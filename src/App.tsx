@@ -1,4 +1,5 @@
 import { HashRouter, NavLink, Route, Routes, useParams } from 'react-router-dom'
+import ThemePicker from './components/ThemePicker'
 import ChangeLogPage from './pages/ChangeLogPage'
 import ChecksPage from './pages/ChecksPage'
 import ImpactPage from './pages/ImpactPage'
@@ -37,6 +38,7 @@ export default function App() {
               <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'on' : '')}>{n.label}</NavLink>
             ))}
           </nav>
+          <ThemePicker />
         </header>
         <main className="app-main">
           <Routes>
