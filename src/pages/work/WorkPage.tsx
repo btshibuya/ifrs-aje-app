@@ -48,7 +48,7 @@ export default function WorkPage() {
   return (
     <>
       <div className="breadcrumb">
-        <Link to="/">進捗一覧</Link> ／ <Link to={`/materials/${period.companies.code}`}>{period.companies.code} {period.companies.name} の資料</Link> ／ {period.label}
+        <Link to="/progress">進捗一覧</Link> ／ <Link to={`/materials/${period.companies.code}`}>{period.companies.code} {period.companies.name} の資料</Link> ／ {period.label}
       </div>
       <div className="page-header">
         <h1>

@@ -269,6 +269,20 @@ export function summarize(states: MaterialState[]) {
   return { counts, total, done }
 }
 
+// 複数の会社の合計（会社ごとに数えてから足す）
+export function summarizeCompanies(perCompany: MaterialState[][]) {
+  const counts: Record<string, number> = {}
+  let total = 0
+  let done = 0
+  for (const states of perCompany) {
+    const s = summarize(states)
+    for (const [k, v] of Object.entries(s.counts)) counts[k] = (counts[k] ?? 0) + v
+    total += s.total
+    done += s.done
+  }
+  return { counts, total, done }
+}
+
 // 進捗一覧などから、各社の期の資料の状況をまとめて読む
 export async function fetchAllMaterialStates(m: MasterData, periods: PeriodRow[]) {
   const ctx = await fetchStatusContext(periods.map((p) => p.id), m.companies.map((c) => c.id), periods.map((p) => p.end_date))

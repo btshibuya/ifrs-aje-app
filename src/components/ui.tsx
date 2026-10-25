@@ -6,8 +6,23 @@ export function Loading() {
   return <div className="muted pad">読み込み中…</div>
 }
 
+// よくあるエラーを、担当者にわかる言葉と次にすることに言い換える（元の文面は「詳しい情報」に残す）
+const FRIENDLY: [RegExp, string][] = [
+  [/Failed to fetch|NetworkError|Load failed/i, 'サーバーに接続できませんでした。通信状況を確認して、ページを再読み込みしてください。'],
+  [/duplicate key/i, '同じものがすでに登録されています。画面を再読み込みして、最新の内容を確認してください。'],
+  [/foreign key/i, 'ほかのデータから参照されているため、この操作はできません。'],
+  [/JWT|permission denied|row-level security/i, 'この操作をする権限がありません。親会社の担当者に連絡してください。'],
+  [/timeout|timed out/i, '時間内に処理が終わりませんでした。少し待ってから、もう一度お試しください。'],
+]
+
 export function ErrorBox({ message }: { message: string }) {
-  return <div className="alert alert-error">エラー：{message}</div>
+  const friendly = FRIENDLY.find(([re]) => re.test(message))?.[1]
+  return (
+    <div className="alert alert-error" role="alert">
+      {friendly ?? message}
+      {friendly && <details className="small"><summary>詳しい情報</summary>{message}</details>}
+    </div>
+  )
 }
 
 export function Money({ value, signed = false }: { value: number | null | undefined; signed?: boolean }) {

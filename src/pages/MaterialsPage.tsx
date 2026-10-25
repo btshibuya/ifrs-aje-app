@@ -6,7 +6,7 @@ import { useAsync, useSlot } from '../lib/hooks'
 import { fetchMasters, type Issue, type PeriodRow } from '../lib/masters'
 import { KIND_LABELS } from '../lib/materials'
 import {
-  MATERIAL_STATUS_LABELS, fetchStatusContext, materialStates, summarize, uploadSourceFile,
+  MATERIAL_STATUS_LABELS, fetchStatusContext, materialStates, summarize, summarizeCompanies, uploadSourceFile,
   type MaterialState, type MaterialStatus,
 } from '../lib/package'
 
@@ -65,8 +65,7 @@ function AllCompanies({ m, states, tooltip }: {
   states: Map<string, { period: PeriodRow; states: MaterialState[] }>
   tooltip: ReturnType<typeof useTooltip>
 }) {
-  const all = [...states.values()].flatMap((s) => s.states)
-  const total = summarize(all)
+  const total = summarizeCompanies([...states.values()].map((s) => s.states))
   const rate = total.total ? Math.round((total.done / total.total) * 100) : 0
   return (
     <>
