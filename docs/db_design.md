@@ -31,7 +31,7 @@
 | ユーザー | profiles | 担当者の表示名・権限。ログイン情報そのものはSupabase Authが保管 |
 | マスタ | companies | 会社（決算月、会計ソフト） |
 | | periods | 決算期。`prior_period_id` で前期とつなぐ。新規連結・除外などの事由も持つ |
-| | issues | 13論点（リース・特別損益の廃止は対象外にした。0007） |
+| | issues | 13論点（リース・特別損益の廃止は対象外にした。0007）。マスタは is_hidden（会社は is_active）で非表示にできる（0008） |
 | | journal_categories | 仕訳区分。方式（累積／洗替／組換）、税効果の区分か、BTrexの区分コード |
 | | group_accounts | グループ統一科目。BS/PL/OCI、流動・非流動、BTrexの科目コード |
 | | account_mappings | 子会社の科目 → グループ統一科目 |

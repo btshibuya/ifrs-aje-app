@@ -674,3 +674,18 @@ td.ref-on { border-radius: 0; }
   .parent-actions { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 6px; }
 }
 @media print { .pkg-toolbar-slot, .pkg-preview .pv-amount { position: static; } }
+
+/* マスタの編集 ------------------------------------------------------------- */
+.master-table { display: flex; flex-direction: column; gap: 10px; }
+.master-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.master-ops { white-space: nowrap; width: 1%; }
+.master-ops .btn-link { margin-right: 10px; font-size: 12px; }
+tr.master-hidden td { color: var(--muted); background: #fafafa; }
+tr.master-editing > td { background: var(--primary-soft); }
+.master-editor { background: var(--surface); border: 1px solid var(--primary-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.master-editor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+.master-field { display: flex; flex-direction: column; gap: 4px; }
+.master-field.wide { grid-column: 1 / -1; }
+.excel-actions { margin: 0; }
+.import-summary ul { margin: 6px 0; padding-left: 18px; max-height: 40vh; overflow: auto; }
+.import-summary p { margin: 4px 0; }

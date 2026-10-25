@@ -214,6 +214,7 @@ interface WorkRow { period_id: string; issue_code: string; status: string }
 interface PolicyRow { period_id: string; issue_code: string; applicability: string | null }
 
 export interface StatusContext {
+  hiddenIssues: Set<string>
   files: SourceFileRow[]
   work: WorkRow[]
   policies: PolicyRow[]
@@ -222,13 +223,15 @@ export interface StatusContext {
 
 // 指定した期の資料の状況をまとめて読む
 export async function fetchStatusContext(periodIds: string[], companyIds: string[], asOfs: string[]): Promise<StatusContext> {
-  const [files, work, policies, entries] = await Promise.all([
+  const [files, work, policies, entries, hidden] = await Promise.all([
     supabase.from('source_files').select('period_id, issue_code, source_kind, uploaded_at, file_name').in('period_id', periodIds).order('uploaded_at', { ascending: false }),
     supabase.from('work_status').select('period_id, issue_code, status').in('period_id', periodIds),
     supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').in('period_id', periodIds),
     supabase.from('package_entries').select('company_id, as_of, form_code, status, updated_at').in('company_id', companyIds).in('as_of', asOfs),
+    supabase.from('issues').select('code').eq('is_hidden', true),
   ])
   return {
+    hiddenIssues: new Set((must(hidden) as { code: string }[]).map((x) => x.code)),
     files: must(files) as SourceFileRow[],
     work: must(work) as WorkRow[],
     policies: must(policies) as PolicyRow[],
@@ -239,7 +242,7 @@ export async function fetchStatusContext(periodIds: string[], companyIds: string
 const WORK_LABELS: Record<string, string> = { imported: '取込済', checked: '明細チェック済', calculated: '計算済', locked: '確定' }
 
 export function materialStates(ctx: StatusContext, period: PeriodRow): MaterialState[] {
-  return MATERIALS.map((m) => {
+  return MATERIALS.filter((m) => !ctx.hiddenIssues.has(m.issueCode)).map((m) => {
     const applicability = ctx.policies.find((p) => p.period_id === period.id && p.issue_code === m.issueCode)?.applicability ?? null
     if (applicability !== 'applied') return { material: m, status: 'not_needed' as const, applicability, updatedAt: null, detail: null }
     if (m.kind === 'package') {

@@ -97,7 +97,8 @@ async function setStatus(periodId: string, issueCode: string, status: string) {
 // 列マッピング：会社×会計ソフト ＞ 会社 ＞ グループ共通×会計ソフト ＞ グループ共通
 export async function fetchColumnMapping(period: Period, sourceKind: string) {
   const rows = must(
-    await supabase.from('column_mappings').select('company_id, software, header_row, mapping').eq('source_kind', sourceKind),
+    // 非表示にした列マッピングは使わない
+    await supabase.from('column_mappings').select('company_id, software, header_row, mapping').eq('source_kind', sourceKind).eq('is_hidden', false),
   ) as { company_id: string | null; software: string; header_row: number; mapping: Record<string, string> }[]
   const sw = period.companies.accounting_software ?? ''
   const score = (r: (typeof rows)[number]) =>
@@ -239,7 +240,7 @@ async function fetchPriorFinal(period: Period, issueCode: string) {
 async function fetchAssetRules(period: Period) {
   const rows = must(
     await supabase.from('asset_class_rules').select('company_id, source_asset_type, useful_life_years, residual_rate, effective_from, note')
-      .or(`company_id.is.null,company_id.eq.${period.company_id}`).lte('effective_from', period.end_date)
+      .or(`company_id.is.null,company_id.eq.${period.company_id}`).lte('effective_from', period.end_date).eq('is_hidden', false)
       .order('effective_from', { ascending: false }),
   ) as { company_id: string | null; source_asset_type: string; useful_life_years: number; residual_rate: number; effective_from: string; note: string | null }[]
   const rules: Record<string, AssetRule & { scope: string; note: string | null }> = {}

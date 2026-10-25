@@ -30,7 +30,8 @@ export interface MasterData {
 
 export async function fetchMasters(): Promise<MasterData> {
   const [issues, companies, periods] = await Promise.all([
-    supabase.from('issues').select('*').order('no'),
+    // 非表示にした論点は、一覧・集計に出さない
+    supabase.from('issues').select('*').eq('is_hidden', false).order('no'),
     supabase.from('companies').select('*').eq('is_active', true).order('code'),
     supabase.from('periods').select('id, company_id, label, start_date, end_date, prior_period_id').order('end_date'),
   ])
