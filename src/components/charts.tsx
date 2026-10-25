@@ -174,10 +174,13 @@ export function DivergingBars({ rows, selected, onSelect, tooltip }: {
 export interface WaterfallStep { key: string; label: ReactNode; value: number; kind: 'delta' | 'total' }
 
 export function Waterfall({ steps, tooltip }: { steps: WaterfallStep[]; tooltip?: ReturnType<typeof useTooltip> }) {
-  // 各段の始点と終点
+  // 各段の始点と終点。合計の段はその値から次の増減を始める（期首残高→増減→期末残高の橋渡しにも使う）
   let run = 0
   const spans = steps.map((s) => {
-    if (s.kind === 'total') return { ...s, from: 0, to: s.value }
+    if (s.kind === 'total') {
+      run = s.value
+      return { ...s, from: 0, to: s.value }
+    }
     const from = run
     run += s.value
     return { ...s, from, to: run }
@@ -210,5 +213,24 @@ export function Waterfall({ steps, tooltip }: { steps: WaterfallStep[]; tooltip?
         )
       })}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 表の中の小さな正負の棒（行どうしの大きさを比べる）
+// ---------------------------------------------------------------------------
+
+// mixed：プラスとマイナスが混ざるときは0を中央に置く。片方だけなら左端を0にして幅を使い切る
+export function InlineBar({ value, maxAbs, mixed }: { value: number; maxAbs: number; mixed: boolean }) {
+  const w = maxAbs > 0 ? (Math.abs(value) / maxAbs) * (mixed ? 50 : 100) : 0
+  const zero = mixed ? 50 : 0
+  return (
+    <span className="viz-inline" aria-hidden>
+      <span className="viz-inline-zero" style={{ left: `${zero}%` }} />
+      {Math.round(value) !== 0 && (
+        <span className={`viz-inline-bar ${value >= 0 ? 'pos' : 'neg'}`}
+          style={!mixed || value >= 0 ? { left: `${zero}%`, width: `max(${w}%, 2px)` } : { right: '50%', width: `max(${w}%, 2px)` }} />
+      )}
+    </span>
   )
 }

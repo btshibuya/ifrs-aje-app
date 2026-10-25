@@ -55,7 +55,7 @@ ul { margin: 4px 0; padding-left: 20px; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
 .card + .card { margin-top: 0; }
-.card-title { font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; gap: 8px; }
+.card-title { font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .detail-card { margin-top: 14px; }
 
 .alert { border-radius: 6px; padding: 10px 14px; border: 1px solid; }
@@ -76,7 +76,7 @@ ul { margin: 4px 0; padding-left: 20px; }
 select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-.segmented button { border: none; background: var(--surface); padding: 7px 12px; cursor: pointer; font: inherit; color: var(--muted); }
+.segmented button { white-space: nowrap; border: none; background: var(--surface); padding: 7px 12px; cursor: pointer; font: inherit; color: var(--muted); }
 .segmented button.on { background: var(--primary); color: #fff; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 14px; flex-wrap: wrap; }
@@ -237,3 +237,9 @@ table.journal td:nth-child(1), table.journal td:nth-child(3) { width: 22%; }
   .hero-row .stat { flex: 1 1 140px; }
   .hero-row .stat-value { font-size: 20px; }
 }
+.viz-inline { position: relative; display: block; width: 120px; height: 12px; }
+@media (max-width: 640px) { .viz-inline { width: 80px; } }
+.viz-inline-zero { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--viz-axis); }
+.viz-inline-bar { position: absolute; top: 1px; bottom: 1px; border-radius: 3px; }
+.viz-inline-bar.pos { background: var(--viz-pos); }
+.viz-inline-bar.neg { background: var(--viz-neg); }

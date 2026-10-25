@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { InlineBar, Waterfall, useTooltip, type WaterfallStep } from '../../components/charts'
 import { ErrorBox, Loading, Money, formatDateTime } from '../../components/ui'
 import { useAsync } from '../../lib/hooks'
 import {
@@ -12,6 +13,19 @@ const pct = (v: unknown) => (typeof v === 'number' ? `${(v * 100).toFixed(2)}%` 
 
 // 計算シートの値：月数・年数・日数は金額ではないので小数をそのまま出す
 const isCount = (label: string) => /月数|年）|日数/.test(label)
+
+// 減価償却の集計（期首差額 − 償却額の差 − 除却時の差 ＝ 期末差額）を橋渡しの図にする
+function depreciationBridge(steps: StepRow[]): WaterfallStep[] | null {
+  const v = (no: number) => Number(steps.find((s) => s.item_key === null && s.step_no === no)?.value ?? NaN)
+  const [open, dep, disposal, close] = [v(1), v(2), v(3), v(4)]
+  if ([open, dep, disposal, close].some((x) => Number.isNaN(x))) return null
+  return [
+    { key: 'open', label: '期首差額', value: open, kind: 'total' },
+    { key: 'dep', label: '償却額の差', value: -dep, kind: 'delta' },
+    { key: 'disposal', label: '除却時の差', value: -disposal, kind: 'delta' },
+    { key: 'close', label: '期末差額', value: close, kind: 'total' },
+  ]
+}
 
 function StepTable({ steps }: { steps: StepRow[] }) {
   return (
@@ -37,6 +51,8 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
+  const [sortByDiff, setSortByDiff] = useState(false)
+  const tooltip = useTooltip()
   const details = useAsync(async () => {
     if (!run) return null
     const [steps, balances, missing] = await Promise.all([
@@ -60,6 +76,10 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
       setBusy(false)
     }
   }
+
+  // 明細の差額の棒の目盛り
+  const diffs = (details.data?.balances ?? []).map((b) => Math.round(Number(b.difference)))
+  const diffScale = { maxAbs: Math.max(0, ...diffs.map(Math.abs)), mixed: diffs.some((d) => d > 0) && diffs.some((d) => d < 0) }
 
   const snap = (run?.assumptions_snapshot ?? {}) as Record<string, unknown>
   const warnings = (snap.warnings as string[] | undefined) ?? []
@@ -87,6 +107,18 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
       {error && <ErrorBox message={error} />}
       {stale && <div className="alert alert-warn">計算のあとで明細が変わりました。再計算してください。</div>}
 
+      {issueCode === 'DEPRECIATION' && details.data && depreciationBridge(details.data.steps) && (
+        <div className="card">
+          <div className="card-title">差額（IFRS − 日本基準）の期首から期末への動き</div>
+          {tooltip.node}
+          <Waterfall steps={depreciationBridge(details.data!.steps)!} tooltip={tooltip} />
+          <div className="viz-legend">
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-pos)' }} /> 差額を増やす要因</span>
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-neg)' }} /> 差額を減らす要因</span>
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-total)' }} /> 期首・期末の残高</span>
+          </div>
+        </div>
+      )}
       {run && (
         <div className="card">
           <div className="card-title">計算に使った前提値（計算時点のスナップショット）</div>
@@ -136,19 +168,29 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
             <StepTable steps={details.data.steps.filter((s) => s.item_key === null)} />
           </div>
           <div className="card">
-            <div className="card-title">明細ごとの計算シート（行を押すと計算過程を表示）</div>
+            <div className="card-title">
+              明細ごとの計算シート（行を押すと計算過程を表示）
+              <div className="segmented small" role="group" aria-label="並び順">
+                <button className={!sortByDiff ? 'on' : ''} onClick={() => setSortByDiff(false)}>番号順</button>
+                <button className={sortByDiff ? 'on' : ''} onClick={() => setSortByDiff(true)}>差額の大きい順</button>
+              </div>
+            </div>
             <div className="table-wrap">
               <table className="compact">
                 <thead>
-                  <tr><th>番号</th><th>名称</th><th>区分</th><th className="num">日本基準 期末</th><th className="num">IFRS 期末</th><th className="num">差額</th></tr>
+                  <tr><th>番号</th><th>名称</th><th className="hide-sp">区分</th><th className="num hide-sp">日本基準 期末</th><th className="num hide-sp">IFRS 期末</th><th className="num">差額</th><th>差額の大きさ</th></tr>
                 </thead>
                 <tbody>
-                  {details.data.balances.map((b) => (
+                  {(sortByDiff
+                    ? [...details.data.balances].sort((a, b) => Math.abs(Number(b.difference)) - Math.abs(Number(a.difference)))
+                    : details.data.balances
+                  ).map((b) => (
                     <FragmentRow key={b.item_key} open={openItem === b.item_key} onToggle={() => setOpenItem(openItem === b.item_key ? null : b.item_key)}
                       cells={[
                         b.item_key, String(b.extra.name ?? ''), MOVEMENT_LABELS[b.movement_type] ?? b.movement_type,
                         <Money value={b.jgaap_amount} />, <Money value={b.ifrs_amount} />, <Money value={b.difference} />,
                       ]}
+                      bar={<InlineBar value={Number(b.difference)} maxAbs={diffScale.maxAbs} mixed={diffScale.mixed} />}
                       detail={<StepTable steps={details.data!.steps.filter((s) => s.item_key === b.item_key)} />}
                     />
                   ))}
@@ -162,13 +204,15 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
   )
 }
 
-function FragmentRow({ cells, detail, open, onToggle }: { cells: React.ReactNode[]; detail: React.ReactNode; open: boolean; onToggle: () => void }) {
+function FragmentRow({ cells, bar, detail, open, onToggle }: { cells: React.ReactNode[]; bar: React.ReactNode; detail: React.ReactNode; open: boolean; onToggle: () => void }) {
   return (
     <>
       <tr className={`clickable${open ? ' selected' : ''}`} onClick={onToggle}>
-        {cells.map((c, i) => <td key={i} className={i >= 3 ? 'num' : ''}>{i === 0 ? <>{open ? '▾' : '▸'} {c}</> : c}</td>)}
+        {/* スマホ幅では区分・日本基準・IFRSの列を隠し、差額と棒を見せる（行を押すと計算過程に全部出る） */}
+        {cells.map((c, i) => <td key={i} className={`${i >= 3 ? 'num' : ''}${i >= 2 && i <= 4 ? ' hide-sp' : ''}`}>{i === 0 ? <span className="nowrap">{open ? '▾' : '▸'} {c}</span> : c}</td>)}
+        <td style={{ verticalAlign: 'middle' }}>{bar}</td>
       </tr>
-      {open && <tr className="detail-row"><td colSpan={cells.length}>{detail}</td></tr>}
+      {open && <tr className="detail-row"><td colSpan={cells.length + 1}>{detail}</td></tr>}
     </>
   )
 }
