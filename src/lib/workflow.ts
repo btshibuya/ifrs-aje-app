@@ -142,7 +142,15 @@ export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPr
     }).select('id').single(),
   ) as { id: string }
 
-  must(await supabase.from('calculation_runs').delete().eq('period_id', period.id).eq('issue_code', cfg.code).neq('status', 'final'))
+  // 仕訳明細が計算ステップを参照しているため、計算より先に仕訳を消す（同時の連鎖削除では外部キー違反になる）
+  const oldRuns = must(
+    await supabase.from('calculation_runs').select('id').eq('period_id', period.id).eq('issue_code', cfg.code).neq('status', 'final'),
+  ) as { id: string }[]
+  if (oldRuns.length > 0) {
+    const ids = oldRuns.map((r) => r.id)
+    must(await supabase.from('journal_entries').delete().in('run_id', ids))
+    must(await supabase.from('calculation_runs').delete().in('id', ids))
+  }
   must(await supabase.from('detail_items').delete().eq('period_id', period.id).eq('issue_code', cfg.code))
   const valid = p.rows.filter((r) => r.errors.length === 0 && r.itemKey !== '')
   if (valid.length > 0) {
