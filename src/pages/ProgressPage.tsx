@@ -3,7 +3,8 @@ import { Legend, StackedBar, useTooltip, type Segment } from '../components/char
 import { ApplicabilityBadge, ErrorBox, Loading, PageHeader, SlotToggle, StatusBadge } from '../components/ui'
 import { useAsync, useSlot } from '../lib/hooks'
 import { ISSUE_CONFIGS, STATUS_LABELS } from '../lib/issues'
-import { fetchMasters } from '../lib/masters'
+import { fetchMasters, type PeriodRow } from '../lib/masters'
+import { fetchAllMaterialStates, summarize } from '../lib/package'
 import { must, supabase } from '../lib/supabase'
 
 interface ProgressRow { period_id: string; issue_code: string; status: string }
@@ -26,8 +27,10 @@ export default function ProgressPage() {
       supabase.from('v_progress').select('period_id, issue_code, status'),
       supabase.from('v_policy_matrix').select('period_id, issue_code, applicability'),
     ])
-    return { m, progress: must(progress) as ProgressRow[], policies: must(policies) as PolicyRow[] }
-  }, [])
+    const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
+    const materials = await fetchAllMaterialStates(m, periods)
+    return { m, progress: must(progress) as ProgressRow[], policies: must(policies) as PolicyRow[], materials }
+  }, [slot])
 
   if (loading && !data) return <Loading />
   if (error) return <ErrorBox message={error} />
@@ -105,6 +108,10 @@ export default function ProgressPage() {
                       <StackedBar segments={toSegments(byCompany.get(c.id) ?? {})} height={6} tooltip={tooltip} />
                       <span className="small muted nowrap">確定 {byCompany.get(c.id)?.locked ?? 0}/{sum(byCompany.get(c.id))}</span>
                     </div>
+                    {data.materials.get(c.id) && (() => {
+                      const ms = summarize(data.materials.get(c.id)!)
+                      return <Link className="small nowrap" to={`/materials/${c.code}`}>資料 {ms.done}/{ms.total} 提出 →</Link>
+                    })()}
                   </th>
                   {m.issues.map((i) => {
                     if (!p) return <td key={i.code} />

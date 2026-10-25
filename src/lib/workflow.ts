@@ -387,14 +387,14 @@ export interface EntryRow {
     memo: string | null
     group_account_code: string
     calculation_step_id: string | null
-    group_accounts: { name: string; statement: string }
+    group_accounts: { name: string; statement: string; bs_class: string | null; pl_class: string | null }
   }[]
 }
 
 export async function fetchEntries(runId: string): Promise<EntryRow[]> {
   const rows = must(
     await supabase.from('journal_entries')
-      .select('id, entry_no, description, category_code, journal_categories(name, carry_method, is_tax_effect), journal_lines(line_no, side, amount, memo, group_account_code, calculation_step_id, group_accounts(name, statement))')
+      .select('id, entry_no, description, category_code, journal_categories(name, carry_method, is_tax_effect), journal_lines(line_no, side, amount, memo, group_account_code, calculation_step_id, group_accounts(name, statement, bs_class, pl_class))')
       .eq('run_id', runId).order('entry_no'),
   ) as unknown as EntryRow[]
   for (const r of rows) r.journal_lines.sort((a, b) => a.line_no - b.line_no)

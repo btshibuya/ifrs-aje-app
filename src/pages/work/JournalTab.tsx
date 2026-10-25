@@ -10,6 +10,14 @@ const CARRY_METHOD_NOTES: Record<string, string> = {
   reclass: '当期の全額を出力（翌期への引継ぎなし）',
 }
 
+// 科目別の合計は BS → PL → OCI の順。BS は資産・負債・純資産、PL は営業・金融・税金の順
+const STATEMENT_ORDER = ['BS', 'PL', 'OCI']
+const CLASS_ORDER = ['current_asset', 'noncurrent_asset', 'current_liability', 'noncurrent_liability', 'equity', 'operating', 'finance', 'income_tax']
+// 税効果の科目（繰延税金資産・負債）は、同じ区分の中で本体の科目の後に置く
+const isTaxAccount = (code: string) => /_DT[AL]$/.test(code)
+const byAccountOrder = ([ca, a]: [string, { cls: string | null }], [cb, b]: [string, { cls: string | null }]) =>
+  (CLASS_ORDER.indexOf(a.cls ?? '') - CLASS_ORDER.indexOf(b.cls ?? '')) || (Number(isTaxAccount(ca)) - Number(isTaxAccount(cb))) || ca.localeCompare(cb)
+
 function toCsv(period: Period, issueName: string, entries: EntryRow[]) {
   const head = ['会社コード', '決算期', '論点', '仕訳区分コード', '仕訳区分', '方式', '仕訳番号', '摘要', '行', '借方科目コード', '借方科目', '借方金額', '貸方科目コード', '貸方科目', '貸方金額', 'メモ']
   const rows = entries.flatMap((e) =>
@@ -47,9 +55,10 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
   if (!data.data) return null
   const { entries, steps } = data.data
 
-  const totals = new Map<string, { name: string; statement: string; net: number }>()
+  const totals = new Map<string, { name: string; statement: string; cls: string | null; net: number }>()
   for (const e of entries) for (const l of e.journal_lines) {
-    const t = totals.get(l.group_account_code) ?? { name: l.group_accounts.name, statement: l.group_accounts.statement, net: 0 }
+    const a = l.group_accounts
+    const t = totals.get(l.group_account_code) ?? { name: a.name, statement: a.statement, cls: a.bs_class ?? a.pl_class, net: 0 }
     t.net += (l.side === 'debit' ? 1 : -1) * Number(l.amount)
     totals.set(l.group_account_code, t)
   }
@@ -138,11 +147,22 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
         <div className="card-title">科目別の合計（借方プラス）</div>
         <table className="compact">
           <thead><tr><th>科目</th><th>区分</th><th className="num">金額</th></tr></thead>
-          <tbody>
-            {[...totals.entries()].map(([code, t]) => (
-              <tr key={code}><td>{t.name} <span className="muted small">{code}</span></td><td>{t.statement}</td><td className="num"><Money value={t.net} /></td></tr>
-            ))}
-          </tbody>
+          {STATEMENT_ORDER.map((st) => {
+            const list = [...totals.entries()].filter(([, t]) => t.statement === st).sort(byAccountOrder)
+            if (list.length === 0) return null
+            const sum = list.reduce((x, [, t]) => x + t.net, 0)
+            return (
+              <tbody key={st} className="statement-group">
+                {list.map(([code, t]) => (
+                  <tr key={code}><td>{t.name} <span className="muted small">{code}</span></td><td>{t.statement}</td><td className="num"><Money value={t.net} /></td></tr>
+                ))}
+                <tr className="subtotal">
+                  <td colSpan={2}>{st} 計{st === 'PL' && <span className="small muted">（当期純利益への影響 <Money value={-sum} signed />）</span>}</td>
+                  <td className="num"><Money value={sum} /></td>
+                </tr>
+              </tbody>
+            )
+          })}
         </table>
       </div>
     </div>

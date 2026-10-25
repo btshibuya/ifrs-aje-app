@@ -26,6 +26,8 @@ export interface PkgField {
   max?: number
   // 自動計算する項目（入力しない）
   compute?: (v: Record<string, unknown>) => number | null
+  // 前年度末の提出の、この項目と一致するはずの項目（期首残高＝前期末残高など）
+  carryFrom?: string
 }
 
 export interface PkgTable {
@@ -110,7 +112,7 @@ export const PACKAGE_FORMS: PackageForm[] = [
     title: '退職給付の数理計算結果',
     intro: '年金数理人（信託銀行・生命保険会社など）から受け取る「退職給付債務の計算結果報告書」の金額を転記します。報告書のPDFも保管しておいてください。',
     fields: [
-      { key: 'dbo_open', label: '期首の退職給付債務', type: 'yen', basis: 'stock', required: true, example: 480000000, help: '前期末時点の退職給付債務（将来払う退職金のうち、これまでの勤務で発生した分の現在価値）です。', where: '計算結果報告書「期首退職給付債務」' },
+      { key: 'dbo_open', label: '期首の退職給付債務', type: 'yen', basis: 'stock', carryFrom: 'dbo_close', required: true, example: 480000000, help: '前期末時点の退職給付債務（将来払う退職金のうち、これまでの勤務で発生した分の現在価値）です。', where: '計算結果報告書「期首退職給付債務」' },
       { key: 'service_cost', label: '勤務費用', type: 'yen', basis: 'flow', required: true, example: 32000000, help: '当期の勤務で新たに発生した退職給付の額です。', where: '同「勤務費用」' },
       { key: 'interest_cost', label: '利息費用', type: 'yen', basis: 'flow', required: true, example: 5760000, help: '期首の債務に割引率を掛けた、時の経過による増加分です。', where: '同「利息費用」' },
       { key: 'actuarial_loss', label: '数理計算上の差異の発生額', type: 'yen', basis: 'flow', required: true, example: -4200000, help: '見積りと実績のずれや、割引率の変更で生じた差額です。債務が減った場合はマイナスで入力します。', where: '同「数理計算上の差異（当期発生額）」' },

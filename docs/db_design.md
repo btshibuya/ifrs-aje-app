@@ -31,7 +31,7 @@
 | ユーザー | profiles | 担当者の表示名・権限。ログイン情報そのものはSupabase Authが保管 |
 | マスタ | companies | 会社（決算月、会計ソフト） |
 | | periods | 決算期。`prior_period_id` で前期とつなぐ。新規連結・除外などの事由も持つ |
-| | issues | 15論点 |
+| | issues | 13論点（リース・特別損益の廃止は対象外にした。0007） |
 | | journal_categories | 仕訳区分。方式（累積／洗替／組換）、税効果の区分か、BTrexの区分コード |
 | | group_accounts | グループ統一科目。BS/PL/OCI、流動・非流動、BTrexの科目コード |
 | | account_mappings | 子会社の科目 → グループ統一科目 |
@@ -47,6 +47,7 @@
 | | item_balances | 明細ごとの期末残高（日本基準・IFRS・差額・OCI累計・一時差異）。翌期の起点 |
 | | journal_entries / journal_lines | 仕訳と仕訳明細。明細ごとに計算根拠の行を持つ |
 | 突合 | btrex_opening_balances | BTrexの開始仕訳の結果（仕訳区分×科目） |
+| 収集 | package_entries | 収集パッケージの入力（会社×基準日×様式）。入力値・増減の理由は data（jsonb）、提出・確認・差し戻しの状況。様式の定義はアプリ側（src/lib/materials.ts） |
 | 管理 | work_status | 会社×期×論点の進捗と確定ロック |
 | | change_logs | 変更履歴（誰が・いつ・何を、変更前後の値） |
 

@@ -3,12 +3,16 @@ import ChangeLogPage from './pages/ChangeLogPage'
 import ChecksPage from './pages/ChecksPage'
 import ImpactPage from './pages/ImpactPage'
 import MastersPage from './pages/MastersPage'
+import MaterialsPage from './pages/MaterialsPage'
+import PackagePage from './pages/package/PackagePage'
 import PolicyPage from './pages/PolicyPage'
 import ProgressPage from './pages/ProgressPage'
 import WorkPage from './pages/work/WorkPage'
 
 const NAV = [
   { to: '/', label: '進捗一覧', end: true },
+  { to: '/materials', label: '資料一覧' },
+  { to: '/package', label: '収集パッケージ' },
   { to: '/policies', label: '会社別方針一覧' },
   { to: '/impact', label: '論点別影響額' },
   { to: '/checks', label: 'チェック' },
@@ -37,6 +41,10 @@ export default function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<ProgressPage />} />
+            <Route path="/materials" element={<MaterialsPage />} />
+            <Route path="/materials/:companyCode" element={<MaterialsPage />} />
+            <Route path="/package" element={<PackagePage />} />
+            <Route path="/package/:companyCode/:asOf?/:formCode?" element={<PackagePage />} />
             <Route path="/policies" element={<PolicyPage />} />
             <Route path="/work/:periodId/:issueCode" element={<WorkRoute />} />
             <Route path="/impact" element={<ImpactPage />} />
