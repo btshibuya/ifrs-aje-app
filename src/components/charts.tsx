@@ -15,7 +15,7 @@ export function useTooltip() {
     onMouseEnter: (e: React.MouseEvent) => setTip({ x: e.clientX, y: e.clientY, content }),
     onMouseMove: (e: React.MouseEvent) => setTip({ x: e.clientX, y: e.clientY, content }),
     onMouseLeave: () => setTip(null),
-    onClick: (e: React.MouseEvent) => setTip({ x: e.clientX, y: e.clientY, content }),
+    // onClick は持たない（行の選択など、呼び出し側のクリック処理を上書きしないため。スマホのタップでも mouseenter が起きる）
   })
   const node = tip ? (
     <div
@@ -114,4 +114,101 @@ export function shortYen(v: number): string {
 export const yenText = (v: number, signed = false) => {
   const n = Math.round(v)
   return `${signed && n > 0 ? '+' : ''}${n.toLocaleString('ja-JP')}`
+}
+
+// ---------------------------------------------------------------------------
+// 正負の横棒（0を中心に、プラスは右・マイナスは左）
+// ---------------------------------------------------------------------------
+
+export interface DivergingRow { key: string; label: ReactNode; sub?: ReactNode; value: number; tip?: ReactNode }
+
+export function DivergingBars({ rows, selected, onSelect, tooltip }: {
+  rows: DivergingRow[]
+  selected?: string | null
+  onSelect?: (key: string) => void
+  tooltip?: ReturnType<typeof useTooltip>
+}) {
+  const { min, max, ticks } = niceDomain(rows.map((r) => r.value))
+  const pos = (v: number) => ((v - min) / (max - min)) * 100
+  const zero = pos(0)
+  return (
+    <div className="viz-div" role="list">
+      <div className="viz-div-row viz-div-axis" aria-hidden>
+        <div />
+        <div className="viz-div-track">
+          {ticks.map((t) => (
+            <span key={t} className="viz-tick" style={{ left: `${pos(t)}%` }}>{shortYen(t)}</span>
+          ))}
+        </div>
+        <div />
+      </div>
+      {rows.map((r) => {
+        const left = Math.min(pos(r.value), zero)
+        const width = Math.abs(pos(r.value) - zero)
+        const sign = r.value >= 0 ? 'pos' : 'neg'
+        return (
+          <div
+            key={r.key}
+            role="listitem"
+            className={`viz-div-row${onSelect ? ' clickable' : ''}${selected === r.key ? ' selected' : ''}`}
+            onClick={() => onSelect?.(r.key)}
+            {...(tooltip ? tooltip.bind(r.tip ?? <><b>{r.label}</b> {yenText(r.value, true)}円</>) : {})}
+          >
+            <div className="viz-div-label">{r.label}{r.sub && <div className="small muted">{r.sub}</div>}</div>
+            <div className="viz-div-track">
+              {ticks.map((t) => <span key={t} className={`viz-grid${t === 0 ? ' zero' : ''}`} style={{ left: `${pos(t)}%` }} />)}
+              <span className={`viz-div-bar ${sign}`} style={{ left: `${left}%`, width: `max(${width}%, 2px)` }} />
+            </div>
+            <div className={`viz-div-value num${r.value < 0 ? ' neg' : ''}`}>{yenText(r.value, true)}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ウォーターフォール（横向き）：増減を積み上げ、小計・合計は灰色の棒
+// ---------------------------------------------------------------------------
+
+export interface WaterfallStep { key: string; label: ReactNode; value: number; kind: 'delta' | 'total' }
+
+export function Waterfall({ steps, tooltip }: { steps: WaterfallStep[]; tooltip?: ReturnType<typeof useTooltip> }) {
+  // 各段の始点と終点
+  let run = 0
+  const spans = steps.map((s) => {
+    if (s.kind === 'total') return { ...s, from: 0, to: s.value }
+    const from = run
+    run += s.value
+    return { ...s, from, to: run }
+  })
+  const { min, max, ticks } = niceDomain(spans.flatMap((s) => [s.from, s.to]))
+  const pos = (v: number) => ((v - min) / (max - min)) * 100
+  return (
+    <div className="viz-div viz-wf">
+      <div className="viz-div-row viz-div-axis" aria-hidden>
+        <div />
+        <div className="viz-div-track">
+          {ticks.map((t) => <span key={t} className="viz-tick" style={{ left: `${pos(t)}%` }}>{shortYen(t)}</span>)}
+        </div>
+        <div />
+      </div>
+      {spans.map((s) => {
+        const left = pos(Math.min(s.from, s.to))
+        const width = Math.abs(pos(s.to) - pos(s.from))
+        const cls = s.kind === 'total' ? 'total' : s.value >= 0 ? 'pos' : 'neg'
+        return (
+          <div key={s.key} className={`viz-div-row${s.kind === 'total' ? ' is-total' : ''}`}
+            {...(tooltip ? tooltip.bind(<><b>{s.label}</b> {yenText(s.value, true)}円</>) : {})}>
+            <div className="viz-div-label">{s.label}</div>
+            <div className="viz-div-track">
+              {ticks.map((t) => <span key={t} className={`viz-grid${t === 0 ? ' zero' : ''}`} style={{ left: `${pos(t)}%` }} />)}
+              <span className={`viz-div-bar ${cls}`} style={{ left: `${left}%`, width: `max(${width}%, 2px)` }} />
+            </div>
+            <div className={`viz-div-value num${s.value < 0 ? ' neg' : ''}`}>{yenText(s.value, true)}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }

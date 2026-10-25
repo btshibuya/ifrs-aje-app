@@ -198,3 +198,42 @@ table.journal td:nth-child(1), table.journal td:nth-child(3) { width: 22%; }
   .app-header { padding: 0 12px; gap: 4px 12px; }
   .app-header nav a { padding: 10px 8px; font-size: 13px; }
 }
+:root {
+  /* 正負：プラス（利益が増える）は青、マイナスは赤、合計は灰色 */
+  --viz-pos: #2a78d6;
+  --viz-neg: #e34948;
+  --viz-total: #52514e;
+}
+.viz-div { display: flex; flex-direction: column; gap: 2px; }
+.viz-div-row { display: grid; grid-template-columns: minmax(120px, 220px) 1fr 120px; align-items: center; gap: 12px; padding: 5px 6px; border-radius: 6px; }
+.viz-div-row.clickable { cursor: pointer; }
+.viz-div-row.clickable:hover { background: #f7f9fc; }
+.viz-div-row.selected { background: var(--primary-soft); }
+.viz-div-row.is-total .viz-div-label, .viz-div-row.is-total .viz-div-value { font-weight: 700; }
+.viz-div-axis { padding-top: 0; padding-bottom: 0; }
+.viz-div-axis .viz-div-track { height: 16px; }
+.viz-div-label { font-size: 13px; line-height: 1.3; }
+.viz-div-value { font-size: 13px; }
+.viz-div-track { position: relative; height: 18px; }
+.viz-grid { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--viz-grid); }
+.viz-grid.zero { background: var(--viz-axis); width: 1px; }
+.viz-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.viz-div-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; }
+.viz-div-bar.pos { background: var(--viz-pos); }
+.viz-div-bar.neg { background: var(--viz-neg); }
+.viz-div-bar.total { background: var(--viz-total); }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+.hero-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.hero-row .stat { padding: 10px 16px; }
+.hero-row .stat-value { font-size: 24px; }
+.impact-table th, .impact-table td { white-space: nowrap; }
+.impact-table td:first-child { min-width: 180px; white-space: normal; }
+@media (max-width: 640px) {
+  .viz-div-row { grid-template-columns: 1fr 96px; gap: 2px 8px; }
+  .viz-div-row .viz-div-track { grid-column: 1 / -1; grid-row: 2; }
+  .viz-div-axis .viz-div-label, .viz-div-axis > div:last-child { display: none; }
+  .viz-div-axis .viz-div-track { grid-row: 1; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .hero-row .stat { flex: 1 1 140px; }
+  .hero-row .stat-value { font-size: 20px; }
+}
