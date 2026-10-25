@@ -130,10 +130,11 @@ export default function PackagePage() {
         </div>
       </div>
 
-      {detail.loading && !detail.data && <Loading />}
+      {/* 会社・基準日を切り替えたときは、前の会社の内容を出さない（自動保存が別の会社に入らないようにする） */}
+      {detail.loading && <Loading />}
       {detail.error && <ErrorBox message={detail.error} />}
-      {detail.data && forms.length === 0 && <div className="alert alert-info">この会社・基準日に入力する様式はありません（収集パッケージの論点がすべて対象外です）。</div>}
-      {detail.data && form && (
+      {!detail.loading && detail.data && forms.length === 0 && <div className="alert alert-info">この会社・基準日に入力する様式はありません（収集パッケージの論点がすべて対象外です）。</div>}
+      {!detail.loading && detail.data && form && (
         <div className="pkg-body">
           <nav className="pkg-nav" aria-label="様式">
             <select className="pkg-nav-select" value={form.code} onChange={(e) => go(e.target.value)} aria-label="様式を選ぶ">
@@ -159,7 +160,7 @@ export default function PackagePage() {
             </div>
           </nav>
           <FormEditor
-            key={`${form.code}|${current.d}`}
+            key={`${company.id}|${form.code}|${current.d}`}
             form={form}
             issueNo={issueNo(form.issueCode)}
             companyId={company.id}

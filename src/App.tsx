@@ -14,6 +14,7 @@ const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
 const PackagePage = lazy(() => import('./pages/package/PackagePage'))
 const PolicyPage = lazy(() => import('./pages/PolicyPage'))
 const ProgressPage = lazy(() => import('./pages/ProgressPage'))
+const ReportPage = lazy(() => import('./pages/ReportPage'))
 const WorkPage = lazy(() => import('./pages/work/WorkPage'))
 
 const NAV = [
@@ -31,7 +32,7 @@ const NAV = [
 // ブラウザのタブ名に、いまの画面名を出す
 const TITLES: [RegExp, string][] = [
   [/^\/$/, 'ホーム'], [/^\/progress/, '進捗一覧'], [/^\/materials/, '資料一覧'], [/^\/package/, '収集パッケージ'],
-  [/^\/policies/, '会社別方針一覧'], [/^\/work/, '作業画面'], [/^\/impact/, '論点別影響額'], [/^\/checks/, 'チェック'],
+  [/^\/policies/, '会社別方針一覧'], [/^\/work/, '作業画面'], [/^\/report/, '検証レポート'], [/^\/impact/, '論点別影響額'], [/^\/checks/, 'チェック'],
   [/^\/logs/, '変更履歴'], [/^\/masters/, 'マスタ'],
 ]
 function TitleSync() {
@@ -41,6 +42,12 @@ function TitleSync() {
     document.title = t ? `${t}｜IFRS AJE` : 'IFRS AJE'
   }, [pathname])
   return null
+}
+
+// 検証レポートも、対象が変わったら作り直す（前の会社の内容や判定を一瞬でも出さない）
+function ReportRoute() {
+  const { periodId, issueCode } = useParams()
+  return <ReportPage key={`${periodId}/${issueCode}`} />
 }
 
 // 会社・期・論点が変わったら作業画面を作り直す（タブの選択などを初期化する）
@@ -76,6 +83,7 @@ export default function App() {
             <Route path="/package/:companyCode/:asOf?/:formCode?" element={<PackagePage />} />
             <Route path="/policies" element={<PolicyPage />} />
             <Route path="/work/:periodId/:issueCode" element={<WorkRoute />} />
+            <Route path="/report/:periodId/:issueCode" element={<ReportRoute />} />
             <Route path="/impact" element={<ImpactPage />} />
             <Route path="/checks" element={<ChecksPage />} />
             <Route path="/logs" element={<ChangeLogPage />} />

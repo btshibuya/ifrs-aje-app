@@ -2,8 +2,16 @@ import type { ReactNode } from 'react'
 import type { Slot } from '../lib/hooks'
 import { APPLICABILITY_LABELS, STATUS_LABELS } from '../lib/issues'
 
+// 読み込み中：画面の骨組み（灰色の帯）を出し、表示が出たときのずれを小さくする。文字は読み上げ用に残す
 export function Loading() {
-  return <div className="muted pad">読み込み中…</div>
+  return (
+    <div className="skeleton" aria-busy="true">
+      <span className="sr-only">読み込み中…</span>
+      <div className="sk sk-title" />
+      <div className="sk-row"><div className="sk sk-card" /><div className="sk sk-card" /><div className="sk sk-card" /></div>
+      <div className="sk sk-line" /><div className="sk sk-line" /><div className="sk sk-line short" />
+    </div>
+  )
 }
 
 // よくあるエラーを、担当者にわかる言葉と次にすることに言い換える（元の文面は「詳しい情報」に残す）

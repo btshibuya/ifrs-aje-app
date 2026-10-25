@@ -60,6 +60,7 @@ export default function WorkPage() {
           {issue.name} <span className="muted small">{issue.standard_ref}</span>
         </h1>
         <div className="page-header-tools">
+          {data.run && <Link className="btn" to={`/report/${period.id}/${issueCode}`}>検証レポート</Link>}
           {data.prior && <Link className="btn" to={`/work/${data.prior.id}/${issueCode}`}>← 前期（{data.prior.label}）</Link>}
           {data.next && <Link className="btn" to={`/work/${data.next.id}/${issueCode}`}>翌期（{data.next.label}）→</Link>}
         </div>

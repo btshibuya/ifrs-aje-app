@@ -574,3 +574,50 @@ input.needs-value { border-color: #e0a100; background: #fffaf0; }
   .toast { max-width: none; }
   .modal-actions .btn { flex: 1; }
 }
+
+/* 読み込み中の骨組み --------------------------------------------------------- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.skeleton { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+.sk { background: linear-gradient(90deg, #e9ecf1 25%, #f3f5f8 50%, #e9ecf1 75%); background-size: 200% 100%; border-radius: 6px; animation: sk 1.2s ease-in-out infinite; }
+.sk-title { height: 24px; width: 220px; }
+.sk-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.sk-card { height: 84px; }
+.sk-line { height: 14px; }
+.sk-line.short { width: 60%; }
+@keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+@media (max-width: 640px) { .sk-row { grid-template-columns: 1fr; } .sk-card { height: 56px; } }
+
+/* 検証レポート -------------------------------------------------------------- */
+.report { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.report-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.report-head h1 { font-size: 19px; margin: 2px 0 4px; }
+.report-summary { display: grid; grid-template-columns: 1.4fr 1fr 1.2fr 1fr; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-left: 6px solid var(--ok); border-radius: 8px; padding: 12px 16px; align-items: start; }
+.report-summary.ng { border-left-color: var(--error); }
+.report-summary.pending { border-left-color: var(--primary-border); }
+.report-verdict { font-size: 18px; font-weight: 700; }
+.report-summary.ok .report-verdict { color: var(--ok); }
+.report-summary.ng .report-verdict { color: var(--error); }
+.report-big { font-size: 18px; font-weight: 700; }
+.report-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+.report-section h2 { font-size: 15px; margin: 0 0 8px; }
+.report-section .hash { max-width: 300px; }
+.report-mark { width: 24px; font-weight: 700; color: var(--ok); }
+.report-mark.ng { color: var(--error); }
+@media (max-width: 640px) { .report-summary { grid-template-columns: 1fr 1fr; } .report-section { overflow-x: auto; } }
+
+/* 印刷 --------------------------------------------------------------------- */
+@page { size: A4; margin: 14mm 12mm; }
+@media print {
+  body, :root { background: #fff; }
+  .app-header, .skip-link, .no-print, .theme-picker, .toasts, .drawer, .drawer-backdrop, .modal-backdrop,
+  .tabs, .actions, .pkg-actionbar, .pkg-nav, .btn, .trace-open, .segmented { display: none !important; }
+  .app-main { padding: 0; max-width: none; }
+  .card, .report-section, .report-summary, .table-wrap, .progress-hero { box-shadow: none; break-inside: avoid; }
+  .table-wrap { overflow: visible; }
+  thead th { position: static; }
+  a { color: inherit; }
+  .report { max-width: none; }
+  .report-section { border-color: #bbb; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
