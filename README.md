@@ -51,6 +51,9 @@ npm run build      # dist/ に出力（静的ホスティングで公開でき�
 node scripts/make-samples.mjs   # public/samples のサンプルを作り直す
 ```
 
+main に push すると、GitHub Actions（`.github/workflows/pages.yml`）がビルドして GitHub Pages に公開します（https://btshibuya.github.io/ifrs-aje-app/ ）。
+初回だけ、GitHub のリポジトリの Settings → Pages で Source を「GitHub Actions」にしてください。
+
 接続先は `src/lib/supabase.ts` にあります（公開用のキー）。環境変数 `VITE_SUPABASE_URL`・`VITE_SUPABASE_PUBLISHABLE_KEY` で上書きできます。
 
 ## 注意（プロトタイプの前提）
