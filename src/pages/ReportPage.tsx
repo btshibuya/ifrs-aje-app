@@ -1,6 +1,7 @@
 // 検証レポート：会社×期×論点の証跡を1枚にまとめる（印刷・PDF保存向け）
 // 開いた時点で、計算の再現と原本のハッシュ値の確認を自動で行い、その結果を載せる
 
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ErrorBox, Loading, Money, StatusBadge, formatDateTime } from '../components/ui'
 import { useAsync } from '../lib/hooks'
@@ -17,6 +18,7 @@ const pct = (v: unknown) => (typeof v === 'number' ? `${(v * 100).toFixed(2)}%` 
 
 export default function ReportPage() {
   const { periodId = '', issueCode = '' } = useParams()
+  const [createdAt] = useState(() => new Date().toISOString()) // レポートを作った日時（開いた時点）
   // 1) 内容（すぐ表示する）
   const { data, error, loading } = useAsync(async () => {
     const [period, policy, ws, items, run, files, issue, wsRow] = await Promise.all([
@@ -76,7 +78,7 @@ export default function ReportPage() {
       <header className="report-head">
         <div className="small muted">IFRS 調整仕訳 検証レポート</div>
         <h1>{period.companies.code} {period.companies.name} ／ {period.label} ／ {issue.no}. {issue.name} <span className="small muted">{issue.standard_ref}</span></h1>
-        <div className="small muted">作成 {formatDateTime(new Date().toISOString())}（このレポートを開いた時点で、計算の再現と原本の確認を自動で行いました）</div>
+        <div className="small muted">作成 {formatDateTime(createdAt)}（このレポートを開いた時点で、計算の再現と原本の確認を自動で行いました）</div>
       </header>
 
       {!run ? <div className="alert alert-info">まだ計算していないため、レポートを作れません。</div> : (

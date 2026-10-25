@@ -20,7 +20,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
     return () => {
       alive = false
     }
-  }, [...deps, tick])
+  }, [key, tick]) // 対象は key（deps を文字列にしたもの）で見る
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
   const data = state.key === key ? state.data : null

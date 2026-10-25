@@ -1,21 +1,21 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { useEffect } from 'react'
 import { HashRouter, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { FeedbackProvider } from './components/feedback'
 import ThemePicker from './components/ThemePicker'
-import { Loading } from './components/ui'
 
-// 画面ごとに分けて読み込む（最初に開く画面に必要な分だけ読む）
-const ChangeLogPage = lazy(() => import('./pages/ChangeLogPage'))
-const ChecksPage = lazy(() => import('./pages/ChecksPage'))
-const HomePage = lazy(() => import('./pages/HomePage'))
-const ImpactPage = lazy(() => import('./pages/ImpactPage'))
-const MastersPage = lazy(() => import('./pages/MastersPage'))
-const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
-const PackagePage = lazy(() => import('./pages/package/PackagePage'))
-const PolicyPage = lazy(() => import('./pages/PolicyPage'))
-const ProgressPage = lazy(() => import('./pages/ProgressPage'))
-const ReportPage = lazy(() => import('./pages/ReportPage'))
-const WorkPage = lazy(() => import('./pages/work/WorkPage'))
+// 画面は分けずに読み込む（画面ごとに分けると、画面のファイルを読んでからデータを読み始めるため、
+// 実測で初回表示が約2割遅くなった。Excel・CSVの読み取りだけは、取り込むときに読む）
+import ChangeLogPage from './pages/ChangeLogPage'
+import ChecksPage from './pages/ChecksPage'
+import HomePage from './pages/HomePage'
+import ImpactPage from './pages/ImpactPage'
+import MastersPage from './pages/MastersPage'
+import MaterialsPage from './pages/MaterialsPage'
+import PackagePage from './pages/package/PackagePage'
+import PolicyPage from './pages/PolicyPage'
+import ProgressPage from './pages/ProgressPage'
+import ReportPage from './pages/ReportPage'
+import WorkPage from './pages/work/WorkPage'
 
 const NAV = [
   { to: '/', label: 'ホーム', end: true },
@@ -73,7 +73,6 @@ export default function App() {
           <ThemePicker />
         </header>
         <main className="app-main" id="main" tabIndex={-1}>
-          <Suspense fallback={<Loading />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/progress" element={<ProgressPage />} />
@@ -89,7 +88,6 @@ export default function App() {
             <Route path="/logs" element={<ChangeLogPage />} />
             <Route path="/masters" element={<MastersPage />} />
           </Routes>
-          </Suspense>
         </main>
       </div>
       </FeedbackProvider>
