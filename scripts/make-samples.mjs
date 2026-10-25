@@ -36,7 +36,7 @@ const S01_ASSETS = [
   { no: 'A005', name: '配送トラック', type: '車両運搬具', acquired: '2021-09-01', cost: 6_000_000, taxLife: 5 },
   { no: 'A006', name: '検査用サーバー', type: '工具器具備品', acquired: '2024-01-01', cost: 4_800_000, taxLife: 5 },
   { no: 'A007', name: '生産管理システム', type: 'ソフトウェア', acquired: '2023-10-01', cost: 12_000_000, taxLife: 5 },
-  { no: 'A008', name: '旧型旋盤', type: '機械装置', acquired: '2014-04-01', cost: 20_000_000, taxLife: 10 },
+  { no: 'A008', name: '旧型旋盤', type: '機械装置', acquired: '2016-04-01', cost: 20_000_000, taxLife: 10 },
   { no: 'A009', name: 'レーザー加工機', type: '機械装置', acquired: '2025-08-01', cost: 60_000_000, taxLife: 10 },
 ]
 
