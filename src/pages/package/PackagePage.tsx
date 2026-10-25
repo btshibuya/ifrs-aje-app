@@ -57,8 +57,10 @@ export default function PackagePage() {
     return { entries, forms: PACKAGE_FORMS.filter((f) => applied.has(f.issueCode)) }
   }, [company?.id, current?.d])
 
-  const [local, setLocal] = useState<Record<string, PackageEntry>>({})
-  useEffect(() => setLocal({}), [company?.id, current?.d])
+  // この画面で保存した内容（会社・基準日が変わったら使わない）
+  const scope = `${company?.id}|${current?.d}`
+  const [saved, setSaved] = useState<{ scope: string; map: Record<string, PackageEntry> }>({ scope: '', map: {} })
+  const local = saved.scope === scope ? saved.map : {}
 
   const entryOf = (code: string, date: string): PackageEntry | undefined =>
     (date === current?.d ? local[code] : undefined) ?? detail.data?.entries.find((e) => e.form_code === code && e.as_of === date)
@@ -167,7 +169,7 @@ export default function PackagePage() {
             priorEntry={(d) => entryOf(form.code, d)}
             enteredBy={enteredBy}
             showExamples={showExamples}
-            onSaved={(e) => setLocal((x) => ({ ...x, [e.form_code]: e }))}
+            onSaved={(e) => setSaved((x) => ({ scope, map: { ...(x.scope === scope ? x.map : {}), [e.form_code]: e } }))}
             nextForm={forms[forms.indexOf(form) + 1]}
             onNext={(code) => go(code)}
           />

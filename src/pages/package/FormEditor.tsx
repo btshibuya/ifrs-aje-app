@@ -498,7 +498,7 @@ function PackageHistory({ form, entryId, version }: { form: PackageForm; entryId
       .then((logs) => alive && setEvents(buildHistory(form, logs)))
       .catch((e: Error) => alive && setError(e.message))
     return () => { alive = false }
-  }, [open, entryId, version])
+  }, [open, entryId, version, form])
   return (
     <details className="card history" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary>記録（いつ・誰が・何をしたか）</summary>

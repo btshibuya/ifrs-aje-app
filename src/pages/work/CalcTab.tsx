@@ -231,7 +231,7 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
                     <FragmentRow key={b.item_key} open={openItem === b.item_key} onToggle={() => setOpenItem(openItem === b.item_key ? null : b.item_key)}
                       cells={[
                         b.item_key, String(b.extra.name ?? ''), MOVEMENT_LABELS[b.movement_type] ?? b.movement_type,
-                        <Money value={b.jgaap_amount} />, <Money value={b.ifrs_amount} />, <Money value={b.difference} />,
+                        <Money key="j" value={b.jgaap_amount} />, <Money key="i" value={b.ifrs_amount} />, <Money key="d" value={b.difference} />,
                       ]}
                       bar={<InlineBar value={Number(b.difference)} maxAbs={diffScale.maxAbs} mixed={diffScale.mixed} />}
                       detail={<StepTable steps={details.data!.steps.filter((s) => s.item_key === b.item_key)} />}

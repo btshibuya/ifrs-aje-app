@@ -19,16 +19,20 @@ export default function WorkPage() {
   const [tab, setTab] = useState<TabKey | null>(null)
 
   const { data, error, loading, reload } = useAsync(async () => {
-    const [period, policy, ws, items, run, issue] = await Promise.all([
+    // 読み込みは並べて行う（前期は今期の情報が必要なので、そのあとで明細のハッシュ計算と並べる）
+    const [period, policy, ws, items, run, issue, nextRows] = await Promise.all([
       fetchPeriod(periodId), fetchPolicy(periodId, issueCode), fetchWorkStatus(periodId, issueCode),
       fetchItems(periodId, issueCode), fetchActiveRun(periodId, issueCode),
       supabase.from('issues').select('name, no, standard_ref').eq('code', issueCode).single(),
+      supabase.from('periods').select('id, label').eq('prior_period_id', periodId),
     ])
-    const [next] = must(await supabase.from('periods').select('id, label').eq('prior_period_id', periodId)) as { id: string; label: string }[]
-    const prior = period.prior_period_id
-      ? (must(await supabase.from('periods').select('id, label').eq('id', period.prior_period_id).single()) as { id: string; label: string })
-      : null
-    const stale = run ? (await itemsHash(items)) !== run.input_hash : false
+    const [next] = must(nextRows) as { id: string; label: string }[]
+    const [prior, stale] = await Promise.all([
+      period.prior_period_id
+        ? supabase.from('periods').select('id, label').eq('id', period.prior_period_id).single().then((r) => must(r) as { id: string; label: string })
+        : Promise.resolve(null),
+      run ? itemsHash(items).then((h) => h !== run.input_hash) : Promise.resolve(false),
+    ])
     return { period, policy, ws, items, run, stale, issue: must(issue) as { name: string; no: number; standard_ref: string }, next, prior }
   }, [periodId, issueCode])
 
