@@ -85,11 +85,12 @@ select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); borde
 .tab-body { padding-top: 14px; }
 
 .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; border: 1px solid transparent; }
-.status-not_started { background: #eef0f3; color: var(--muted); }
-.status-imported { background: #e8f0fa; color: #1d4f91; }
-.status-checked { background: #e0f2f1; color: #0f6b63; }
-.status-calculated { background: #fff1d6; color: #8a5a00; }
-.status-locked { background: var(--ok); color: #fff; }
+/* 状況のバッジはグラフと同じ色（未着手→確定で濃くなる） */
+.status-not_started { background: #f1f0ec; color: var(--muted); }
+.status-imported { background: var(--viz-st-imported); color: #0b0b0b; }
+.status-checked { background: var(--viz-st-checked); color: #0b0b0b; }
+.status-calculated { background: var(--viz-st-calculated); color: #fff; }
+.status-locked { background: var(--viz-st-locked); color: #fff; }
 .status-error { background: var(--error-soft); color: var(--error); }
 .app-applied { background: #e8f0fa; color: var(--primary); }
 .app-not_applicable { background: #eef0f3; color: var(--muted); }
@@ -152,3 +153,48 @@ tr.detail-row > td { background: #fafbfc; padding: 10px 16px 14px 32px; }
 .entry-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .entry-no { font-weight: 700; }
 table.journal td:nth-child(1), table.journal td:nth-child(3) { width: 22%; }
+
+/* グラフ ------------------------------------------------------------------ */
+:root {
+  /* 進み具合（順序のある段階）：未着手は無彩色、取込済→確定は青の濃淡 */
+  --viz-st-not_started: #e1e0d9;
+  --viz-st-imported: #86b6ef;
+  --viz-st-checked: #5598e7;
+  --viz-st-calculated: #256abf;
+  --viz-st-locked: #104281;
+  --viz-grid: #e1e0d9;
+  --viz-axis: #c3c2b7;
+  --viz-ink-2: #52514e;
+}
+.viz-tooltip { position: fixed; z-index: 50; pointer-events: none; background: #fff; color: var(--text); border: 1px solid rgba(11, 11, 11, .1); box-shadow: 0 4px 14px rgba(0, 0, 0, .12); border-radius: 6px; padding: 6px 10px; font-size: 12px; max-width: 260px; font-variant-numeric: tabular-nums; }
+.viz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--viz-ink-2); }
+.viz-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.viz-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.viz-legend-value { color: var(--text); font-variant-numeric: tabular-nums; }
+.viz-stack { display: flex; gap: 2px; width: 100%; }
+.viz-stack-seg { min-width: 3px; cursor: default; }
+.viz-stack-seg:first-child { border-radius: 4px 0 0 4px; }
+.viz-stack-seg:last-child { border-radius: 0 4px 4px 0; }
+.viz-stack-seg:only-child { border-radius: 4px; }
+.viz-stack-seg:hover { filter: brightness(.92); }
+.viz-stack-empty { flex: 1; background: var(--viz-st-not_started); border-radius: 4px; }
+
+.progress-hero { display: grid; grid-template-columns: auto 1fr; gap: 6px 24px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.hero-label { font-size: 12px; color: var(--muted); }
+.hero-value { font-size: 30px; font-weight: 700; line-height: 1.1; }
+.hero-value small { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+@media (max-width: 640px) { .progress-hero { grid-template-columns: 1fr; } }
+.company-progress { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.company-progress .viz-stack { flex: 1; max-width: 140px; }
+.matrix tfoot td, .matrix tfoot th { background: #fafbfc; border-top: 2px solid var(--border); font-size: 11px; color: var(--muted); }
+.matrix tfoot .sticky-col { background: #fafbfc; }
+.issue-rate { display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 640px) {
+  .app-main { padding: 14px 12px; }
+  .matrix .sticky-col { min-width: 132px; max-width: 132px; font-size: 12px; }
+  .matrix th, .matrix td { min-width: 76px; }
+  .company-progress { flex-wrap: wrap; gap: 2px; }
+  .hide-sp { display: none; }
+  .app-header { padding: 0 12px; gap: 4px 12px; }
+  .app-header nav a { padding: 10px 8px; font-size: 13px; }
+}
