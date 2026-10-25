@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { ErrorBox, Loading, Money } from '../../components/ui'
 import { useAsync } from '../../lib/hooks'
 import { CARRY_METHOD_LABELS } from '../../lib/issues'
 import { fetchEntries, fetchSteps, lockIssue, unlockIssue, type EntryRow, type Period, type Run } from '../../lib/workflow'
+import TracePanel from './TracePanel'
 
 const CARRY_METHOD_NOTES: Record<string, string> = {
   cumulative: '当期の変動分を出力（期首残高はBTrexの開始仕訳で入る）',
@@ -43,6 +44,8 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [trace, setTrace] = useState<{ entry: EntryRow; line: EntryRow['journal_lines'][number] } | null>(null)
+  const closeTrace = useCallback(() => setTrace(null), [])
   const data = useAsync(async () => {
     if (!run) return null
     const [entries, steps] = await Promise.all([fetchEntries(run.id), fetchSteps(run.id)])
@@ -108,6 +111,7 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
         </div>
       </div>
       {error && <ErrorBox message={error} />}
+      {trace && <TracePanel period={period} issueCode={issueCode} run={run} entry={trace.entry} line={trace.line} onClose={closeTrace} />}
       {locked && <div className="alert alert-info">確定済みです。明細・計算・仕訳はDB側で変更できないようにロックされています。翌期はこの計算の期末残高から引き継ぎます。</div>}
 
       {entries.map((e) => (
@@ -120,6 +124,7 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
             </span>
             <span>{e.description}</span>
           </div>
+          <div className="table-wrap journal-wrap">
           <table className="compact journal">
             <thead>
               <tr><th>借方科目</th><th className="num">借方金額</th><th>貸方科目</th><th className="num">貸方金額</th><th>計算根拠</th></tr>
@@ -133,12 +138,16 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
                     <td className="num">{l.side === 'debit' && <Money value={l.amount} />}</td>
                     <td>{l.side === 'credit' && <>{l.group_accounts.name} <span className="muted small">{l.group_account_code}</span></>}</td>
                     <td className="num">{l.side === 'credit' && <Money value={l.amount} />}</td>
-                    <td className="small">{s ? <span title={s.formula ?? ''}>計算シート「{s.label}」<span className="muted">：{s.formula}</span></span> : ''}</td>
+                    <td className="small">
+                      {s ? <span title={s.formula ?? ''}>計算シート「{s.label}」<span className="muted">：{s.formula}</span></span> : ''}
+                      <button className="btn-link trace-open" onClick={() => setTrace({ entry: e, line: l })}>根拠をたどる ›</button>
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
+          </div>
           <div className="small muted">{CARRY_METHOD_NOTES[e.journal_categories.carry_method]}</div>
         </div>
       ))}

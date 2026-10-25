@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ErrorBox, formatDateTime } from '../../components/ui'
+import { fetchRecordLogs, type LogRow } from '../../lib/verify'
 import type { PackageForm, PkgField } from '../../lib/materials'
 import {
   ENTRY_STATUS_LABELS, UNIT, VARIANCE_THRESHOLD, describeChange, firstCompareDate, formatNumber, isNumeric, numericFields, parseNumber, saveDraft,
@@ -254,6 +255,8 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
         </div>
       </div>
 
+      {entry && <PackageHistory form={form} entryId={entry.id} version={entry.updated_at} />}
+
       {(status === 'submitted' || status === 'confirmed') && (
         <div className="card parent-review">
           <div className="card-title">親会社の確認 <span className="small muted">（親会社の担当者が操作します）</span></div>
@@ -428,5 +431,93 @@ function TableEditor({ form, data, readOnly, showExamples, dates, priorEntry, sh
       )}
       {showProblems && problems.filter((p) => p.key === 'rows').map((p) => <div key={p.message} className="small text-error">{p.message}</div>)}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 記録（履歴）：いつ・誰が・何をしたか。DBの変更履歴（change_logs）から作る
+// 自動保存が続いた部分は「下書き保存 n回」にまとめ、変わった項目名を出す
+// ---------------------------------------------------------------------------
+
+interface HistoryEvent { at: string; kind: 'create' | 'save' | 'status' | 'delete'; title: string; detail: string }
+
+const STATUS_WORD: Record<string, string> = { draft: '入力中', submitted: '提出済', confirmed: '確認済' }
+
+export function buildHistory(form: PackageForm, logs: LogRow[]): HistoryEvent[] {
+  const labelOf = (k: string) => [...(form.fields ?? []), ...(form.table?.columns ?? [])].find((f) => f.key === k)?.label ?? k
+  const out: HistoryEvent[] = []
+  for (const l of logs) {
+    const b = (l.before_data ?? {}) as Record<string, unknown>
+    const a = (l.after_data ?? {}) as Record<string, unknown>
+    const who = String(a.entered_by ?? b.entered_by ?? '') || '（入力者名なし）'
+    if (l.action === 'INSERT') {
+      out.push({ at: l.changed_at, kind: 'create', title: '入力を始めた', detail: who })
+      continue
+    }
+    if (l.action === 'DELETE') {
+      out.push({ at: l.changed_at, kind: 'delete', title: '削除された', detail: '' })
+      continue
+    }
+    if (a.status !== b.status) {
+      const to = String(a.status)
+      const title = to === 'submitted' ? '提出した' : to === 'confirmed' ? '親会社が確認した' : a.return_note && !b.return_note ? '親会社が差し戻した' : '提出を取り消した'
+      const detail = to === 'confirmed' ? String(a.confirmed_by ?? '') : to === 'draft' && a.return_note ? `理由：${a.return_note}` : who
+      out.push({ at: l.changed_at, kind: 'status', title: `${title}（${STATUS_WORD[String(b.status)] ?? ''} → ${STATUS_WORD[to] ?? to}）`, detail })
+      continue
+    }
+    // 入力値の変更：変わった項目を集める
+    const bd = (b.data ?? {}) as EntryData
+    const ad = (a.data ?? {}) as EntryData
+    const keys = new Set<string>()
+    for (const k of new Set([...Object.keys(bd.fields ?? {}), ...Object.keys(ad.fields ?? {})])) if (JSON.stringify(bd.fields?.[k]) !== JSON.stringify(ad.fields?.[k])) keys.add(labelOf(k))
+    if (JSON.stringify(bd.rows ?? []) !== JSON.stringify(ad.rows ?? [])) keys.add(`明細（${(ad.rows ?? []).length}行）`)
+    if (JSON.stringify(bd.reasons ?? {}) !== JSON.stringify(ad.reasons ?? {})) keys.add('増減の理由')
+    if ((bd.note ?? '') !== (ad.note ?? '')) keys.add('備考')
+    if (keys.size === 0) continue
+    const last = out[out.length - 1]
+    if (last?.kind === 'save') {
+      const prev = new Set(last.detail.split('、').filter(Boolean))
+      for (const k of keys) prev.add(k)
+      const n = Number(last.title.match(/(\d+)回/)?.[1] ?? 1) + 1
+      Object.assign(last, { at: l.changed_at, title: `下書き保存 ${n}回`, detail: [...prev].join('、') })
+    } else {
+      out.push({ at: l.changed_at, kind: 'save', title: '下書き保存 1回', detail: [...keys].join('、') })
+    }
+  }
+  return out
+}
+
+function PackageHistory({ form, entryId, version }: { form: PackageForm; entryId: string; version: string }) {
+  const [open, setOpen] = useState(false)
+  const [events, setEvents] = useState<HistoryEvent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    fetchRecordLogs('package_entries', entryId)
+      .then((logs) => alive && setEvents(buildHistory(form, logs)))
+      .catch((e: Error) => alive && setError(e.message))
+    return () => { alive = false }
+  }, [open, entryId, version])
+  return (
+    <details className="card history" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>記録（いつ・誰が・何をしたか）</summary>
+      {error && <ErrorBox message={error} />}
+      {open && !events && !error && <div className="small muted">読み込み中…</div>}
+      {events && (
+        <ol className="timeline">
+          {[...events].reverse().map((ev, i) => (
+            <li key={i} className={`tl-${ev.kind}`}>
+              <span className="tl-dot" aria-hidden />
+              <div>
+                <div><b>{ev.title}</b> <span className="small muted">{formatDateTime(ev.at)}</span></div>
+                {ev.detail && <div className="small">{ev.detail}</div>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="small muted">記録はDBが自動で残します（画面からは変更できません）。</p>
+    </details>
   )
 }

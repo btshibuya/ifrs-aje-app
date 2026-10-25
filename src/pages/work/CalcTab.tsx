@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { InlineBar, Waterfall, useTooltip, type WaterfallStep } from '../../components/charts'
 import { ErrorBox, Loading, Money, formatDateTime } from '../../components/ui'
+import { reproduceCalculation, type CheckResult } from '../../lib/verify'
 import { useAsync } from '../../lib/hooks'
 import {
   fetchBalances, fetchMissingCarryforward, fetchSteps, planCalculation, saveCalculation,
@@ -52,6 +53,21 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
   const [error, setError] = useState<string | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
   const [sortByDiff, setSortByDiff] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<{ at: string; checks: CheckResult[] } | null>(null)
+  const [verifyError, setVerifyError] = useState<string | null>(null)
+  const onVerify = async () => {
+    if (!run) return
+    setVerifying(true)
+    setVerifyError(null)
+    try {
+      setVerifyResult({ at: new Date().toISOString(), checks: await reproduceCalculation(period, issueCode, items, run) })
+    } catch (e) {
+      setVerifyError((e as Error).message)
+    } finally {
+      setVerifying(false)
+    }
+  }
   const tooltip = useTooltip()
   const details = useAsync(async () => {
     if (!run) return null
@@ -119,6 +135,33 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
           </div>
         </div>
       )}
+      {run && (
+        <div className="card verify-card">
+          <div className="card-title">
+            <span>計算の検証（もう一度計算して、保存された結果と比べる）</span>
+            <button className="btn btn-sm" disabled={verifying} onClick={() => void onVerify()}>{verifying ? '検証しています…' : verifyResult ? 'もう一度検証する' : 'この計算を検証する'}</button>
+          </div>
+          {!verifyResult && !verifyError && <p className="small muted" style={{ margin: 0 }}>保存されている計算結果が、同じ入力・同じ前提値から再現できるかを確かめます。DBの値を書き換えた場合などに不一致として見つかります。</p>}
+          {verifyError && <ErrorBox message={verifyError} />}
+          {verifyResult && (
+            <>
+              <ul className="verify-list">
+                {verifyResult.checks.map((c) => (
+                  <li key={c.label} className={c.ok ? 'ok' : 'ng'}>
+                    <span className="verify-icon" aria-hidden>{c.ok ? '✓' : '!'}</span>
+                    <span><b>{c.label}</b><span className="small muted"> {c.detail}</span></span>
+                  </li>
+                ))}
+              </ul>
+              <div className="small muted">
+                {verifyResult.checks.every((c) => c.ok) ? 'すべて一致しました。この計算結果は、保存された入力と前提値から再現できます。' : '一致しない項目があります。内容を確認し、必要なら再計算してください。'}
+                （検証 {formatDateTime(verifyResult.at)}）
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {run && (
         <div className="card">
           <div className="card-title">計算に使った前提値（計算時点のスナップショット）</div>
