@@ -56,10 +56,12 @@ export async function saveDraft(companyId: string, asOf: string, form: PackageFo
 
 export async function setEntryStatus(id: string, status: EntryStatus, extra: Partial<PackageEntry> = {}) {
   const now = new Date().toISOString()
-  const patch: Record<string, unknown> = { status, updated_at: now, ...extra }
+  const patch: Record<string, unknown> = { status, updated_at: now }
   if (status === 'submitted') Object.assign(patch, { submitted_at: now, confirmed_at: null, confirmed_by: null, return_note: null })
   if (status === 'confirmed') patch.confirmed_at = now
   if (status === 'draft') Object.assign(patch, { submitted_at: null, confirmed_at: null, confirmed_by: null })
+  // 呼び出し側の指定（入力者・確認者・差し戻した人と理由）を最後に重ねる
+  Object.assign(patch, extra)
   return must(await supabase.from('package_entries').update(patch).eq('id', id).select('*').single()) as PackageEntry
 }
 

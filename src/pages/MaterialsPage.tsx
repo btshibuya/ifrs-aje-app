@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Legend, StackedBar, useTooltip, type Segment } from '../components/charts'
+import { useFeedback } from '../components/feedback'
 import { ApplicabilityBadge, ErrorBox, Loading, PageHeader, SlotToggle, formatDateTime } from '../components/ui'
 import { useAsync, useSlot } from '../lib/hooks'
 import { fetchMasters, type Issue, type PeriodRow } from '../lib/masters'
@@ -199,6 +200,7 @@ function CompanyMaterials({ issues, companyCode, companyName, period, states, on
 function MaterialRow({ state, period, companyCode, onChanged }: { state: MaterialState; period: PeriodRow; companyCode: string; onChanged: () => void }) {
   const { material: mt, status } = state
   const input = useRef<HTMLInputElement>(null)
+  const fb = useFeedback()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -208,6 +210,7 @@ function MaterialRow({ state, period, companyCode, onChanged }: { state: Materia
     setError(null)
     try {
       await uploadSourceFile(period, mt, file)
+      fb.toast(`「${mt.name}」を提出しました（${file.name}）`)
       onChanged()
     } catch (e) {
       setError((e as Error).message)

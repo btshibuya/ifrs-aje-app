@@ -122,7 +122,7 @@ export default function PackagePage() {
           </label>
           <label className="field-inline">
             <span>入力者</span>
-            <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="例：山田 花子" />
+            <input id="entered-by" value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="例：山田 花子（必須）" aria-required="true" className={enteredBy.trim() ? '' : 'needs-value'} />
           </label>
           <label className="check-inline">
             <input type="checkbox" checked={showExamples} onChange={(e) => setShowExamples(e.target.checked)} /> 入力例を表示

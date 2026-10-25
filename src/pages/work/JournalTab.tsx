@@ -4,6 +4,7 @@ import { useAsync } from '../../lib/hooks'
 import { CARRY_METHOD_LABELS } from '../../lib/issues'
 import { fetchEntries, fetchSteps, lockIssue, unlockIssue, type EntryRow, type Period, type Run } from '../../lib/workflow'
 import TracePanel from './TracePanel'
+import { useFeedback } from '../../components/feedback'
 
 const CARRY_METHOD_NOTES: Record<string, string> = {
   cumulative: '当期の変動分を出力（期首残高はBTrexの開始仕訳で入る）',
@@ -44,6 +45,7 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fb = useFeedback()
   const [trace, setTrace] = useState<{ entry: EntryRow; line: EntryRow['journal_lines'][number] } | null>(null)
   const closeTrace = useCallback(() => setTrace(null), [])
   const data = useAsync(async () => {
@@ -66,11 +68,12 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
     totals.set(l.group_account_code, t)
   }
 
-  const act = async (fn: () => Promise<void>) => {
+  const act = async (fn: () => Promise<void>, done?: string) => {
     setBusy(true)
     setError(null)
     try {
       await fn()
+      if (done) fb.toast(done)
       onDone()
     } catch (e) {
       setError((e as Error).message)
@@ -100,11 +103,23 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
         <div className="actions">
           <button className="btn" onClick={download}>CSVで出力</button>
           {locked ? (
-            <button className="btn btn-danger-outline" disabled={busy} onClick={() => confirm('確定を解除しますか？解除の操作は変更履歴に残ります。') && act(() => unlockIssue(period.id, issueCode, run.id))}>
+            <button className="btn btn-danger-outline" disabled={busy} onClick={async () => {
+              const ok = await fb.confirm({
+                title: '確定を解除しますか？', confirmLabel: '確定を解除する', danger: true,
+                body: <ul><li>明細・計算・仕訳を、また変更できるようになります。</li><li>翌期が、この期の期末残高を引き継いでいる場合は、翌期も見直しが必要です。</li><li>解除の操作は変更履歴に残ります。</li></ul>,
+              })
+              if (ok !== null) await act(() => unlockIssue(period.id, issueCode, run.id), '確定を解除しました')
+            }}>
               確定を解除
             </button>
           ) : (
-            <button className="btn btn-primary" disabled={busy || stale || unbalanced.length > 0} onClick={() => confirm('この計算で確定しますか？確定すると、明細・計算・仕訳を変更できなくなります。') && act(() => lockIssue(period.id, issueCode, run.id))}>
+            <button className="btn btn-primary" disabled={busy || stale || unbalanced.length > 0} onClick={async () => {
+              const ok = await fb.confirm({
+                title: 'この計算で確定しますか？', confirmLabel: '確定する',
+                body: <ul><li>仕訳 {entries.length}件（貸借一致）を確定します。</li><li>確定すると、明細・計算・仕訳はDB側でロックされ、変更できなくなります。</li><li>翌期は、この計算の期末残高から引き継ぎます。</li></ul>,
+              })
+              if (ok !== null) await act(() => lockIssue(period.id, issueCode, run.id), '確定しました')
+            }}>
               この計算で確定する
             </button>
           )}

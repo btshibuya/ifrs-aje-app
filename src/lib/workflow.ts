@@ -4,7 +4,10 @@ import { calcDepreciation, type AssetRule } from '../calc/depreciation'
 import { calcPaidLeave } from '../calc/paidLeave'
 import type { CalcResult, DetailItem, PriorBalance } from '../calc/types'
 import type { IssueConfig } from './issues'
-import { mapRows, readRows, sha256, type MappedRow } from './parse'
+// 取込ファイルの読み取り（Excel・CSVの読み取りライブラリ）は大きいため、取り込むときにだけ読み込む
+import type { MappedRow } from './parse'
+import { sha256 } from './hash'
+const loadParser = () => import('./parse')
 import { must, supabase } from './supabase'
 
 export interface Company {
@@ -118,6 +121,7 @@ export interface ImportPreview {
 
 export async function previewImport(period: Period, cfg: IssueConfig, file: File): Promise<ImportPreview> {
   const mapping = await fetchColumnMapping(period, cfg.sourceKind)
+  const { readRows, mapRows } = await loadParser()
   const table = await readRows(file)
   const { rows, missingColumns } = mapRows(table, mapping.header_row, mapping.mapping, cfg.fields, cfg.keyField)
   const seen = new Set<string>()

@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ErrorBox, formatDateTime } from '../../components/ui'
+import { useFeedback } from '../../components/feedback'
 import { fetchRecordLogs, type LogRow } from '../../lib/verify'
 import type { PackageForm, PkgField } from '../../lib/materials'
 import {
@@ -38,6 +39,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
   const [savedAt, setSavedAt] = useState<string | null>(entry?.updated_at ?? null)
   const [error, setError] = useState<string | null>(null)
   const [showProblems, setShowProblems] = useState(false)
+  const fb = useFeedback()
   const status = entry?.status ?? 'todo'
   const readOnly = status === 'submitted' || status === 'confirmed'
 
@@ -81,25 +83,40 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
 
   // 前回の値をコピー：直前四半期、なければ前年度末の提出内容から（自動計算の項目は除く）
   const source = priorEntry(dates.prevQuarter) ?? priorEntry(dates.priorYearEnd)
-  const copyPrior = () => {
+  const copyPrior = async () => {
     if (!source) return
     const filled = form.fields ? Object.values(data.fields ?? {}).some((v) => v !== null && v !== '') : (data.rows ?? []).length > 0
-    if (filled && !confirm('入力済みの内容を、前回の値で置き換えますか？')) return
+    if (filled && (await fb.confirm({
+      title: '前回の値で置き換えますか？', confirmLabel: '置き換える',
+      body: <p>いま入力している内容を、{short(source.as_of)} に提出された値で置き換えます。置き換えたあとも、1つずつ直せます。</p>,
+    })) === null) return
     update((d) => form.fields
       ? { ...d, fields: Object.fromEntries(form.fields.filter((f) => !f.compute).map((f) => [f.key, source.data.fields?.[f.key] ?? null])) }
       : { ...d, rows: (source.data.rows ?? []).map((r) => ({ ...r })), none: false })
   }
 
-  const act = async (fn: () => Promise<PackageEntry>) => {
+  const act = async (fn: () => Promise<PackageEntry>, done?: string) => {
     setError(null)
     try {
       onSaved(await fn())
+      if (done) fb.toast(done)
     } catch (e) {
       setError((e as Error).message)
     }
   }
 
+  // 誰が提出・確認したかを記録に残すため、入力者名を必須にする
+  const needName = () => {
+    if (enteredBy.trim()) return false
+    const el = document.getElementById('entered-by') as HTMLInputElement | null
+    el?.focus()
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    fb.toast('画面上部の「入力者」に名前を入れてください（記録に残します）', 'error')
+    return true
+  }
+
   const submit = async () => {
+    if (needName()) return
     if (problems.length > 0) {
       setShowProblems(true)
       document.getElementById(`pf-${problems[0].key}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -107,7 +124,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
     }
     const saved = dirty || !entry ? await save() : entry
     if (!saved) return
-    await act(() => setEntryStatus(saved.id, 'submitted', { entered_by: enteredBy || saved.entered_by }))
+    await act(() => setEntryStatus(saved.id, 'submitted', { entered_by: enteredBy.trim() }), `「${form.title}」を提出しました`)
   }
 
   const filledCount = form.fields
@@ -133,7 +150,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
 
       <div className="pkg-legend small">
         <span><b>比べる値：</b>残高・率（BS）は<b>前年度末</b>、期間の金額（PL）は<b>前年同期</b>。どちらも<b>直前四半期</b>を並べます。</span>
-        {!readOnly && source && <button className="btn btn-sm" onClick={copyPrior}>前回（{short(source.as_of)}）の値をコピー</button>}
+        {!readOnly && source && <button className="btn btn-sm" onClick={() => void copyPrior()}>前回（{short(source.as_of)}）の値をコピー</button>}
       </div>
 
       {form.fields && (
@@ -250,7 +267,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
         <div className="actions">
           {!readOnly && <button className="btn" disabled={saving || !dirty} onClick={() => void save()}>下書き保存</button>}
           {!readOnly && <button className="btn btn-primary" disabled={saving} onClick={() => void submit()}>提出する</button>}
-          {status === 'submitted' && <button className="btn" onClick={() => act(() => setEntryStatus(entry!.id, 'draft'))}>提出を取り消す</button>}
+          {status === 'submitted' && <button className="btn" onClick={() => act(() => setEntryStatus(entry!.id, 'draft'), '提出を取り消しました')}>提出を取り消す</button>}
           {readOnly && nextForm && <button className="btn btn-primary" onClick={() => onNext(nextForm.code)}>次の様式へ：{nextForm.title}</button>}
         </div>
       </div>
@@ -261,10 +278,15 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
         <div className="card parent-review">
           <div className="card-title">親会社の確認 <span className="small muted">（親会社の担当者が操作します）</span></div>
           <div className="actions">
-            {status === 'submitted' && <button className="btn btn-primary" onClick={() => act(() => setEntryStatus(entry!.id, 'confirmed', { confirmed_by: enteredBy || '親会社' }))}>確認済にする</button>}
-            <button className="btn btn-danger-outline" onClick={() => {
-              const note = prompt('差し戻す理由を入力してください（担当者の画面に表示されます）')
-              if (note) void act(() => setEntryStatus(entry!.id, 'draft', { return_note: note }))
+            {status === 'submitted' && <button className="btn btn-primary" onClick={() => { if (!needName()) void act(() => setEntryStatus(entry!.id, 'confirmed', { confirmed_by: enteredBy.trim() }), '確認済にしました') }}>確認済にする</button>}
+            <button className="btn btn-danger-outline" onClick={async () => {
+              if (needName()) return
+              const note = await fb.confirm({
+                title: '差し戻しますか？', confirmLabel: '差し戻す', danger: true,
+                body: <p>様式は「入力中」に戻り、担当者の画面に理由が表示されます。</p>,
+                input: { label: '差し戻す理由', placeholder: '例：割引率の根拠資料を添付してください' },
+              })
+              if (note) await act(() => setEntryStatus(entry!.id, 'draft', { return_note: note, confirmed_by: enteredBy.trim() }), '差し戻しました')
             }}>差し戻す</button>
           </div>
         </div>
@@ -461,7 +483,8 @@ export function buildHistory(form: PackageForm, logs: LogRow[]): HistoryEvent[] 
     if (a.status !== b.status) {
       const to = String(a.status)
       const title = to === 'submitted' ? '提出した' : to === 'confirmed' ? '親会社が確認した' : a.return_note && !b.return_note ? '親会社が差し戻した' : '提出を取り消した'
-      const detail = to === 'confirmed' ? String(a.confirmed_by ?? '') : to === 'draft' && a.return_note ? `理由：${a.return_note}` : who
+      const detail = to === 'confirmed' ? String(a.confirmed_by ?? '')
+        : to === 'draft' && a.return_note && !b.return_note ? `${a.confirmed_by ? `${a.confirmed_by} ／ ` : ''}理由：${a.return_note}` : who
       out.push({ at: l.changed_at, kind: 'status', title: `${title}（${STATUS_WORD[String(b.status)] ?? ''} → ${STATUS_WORD[to] ?? to}）`, detail })
       continue
     }

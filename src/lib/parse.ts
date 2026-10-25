@@ -4,6 +4,8 @@ import Papa from 'papaparse'
 import { readSheet } from 'read-excel-file/browser'
 import type { FieldDef } from './issues'
 
+export { sha256 } from './hash'
+
 export type CellValue = string | number | boolean | Date | null
 
 export async function readRows(file: File): Promise<CellValue[][]> {
@@ -95,8 +97,3 @@ export function mapRows(
   return { rows, missingColumns }
 }
 
-export async function sha256(buf: ArrayBuffer | string): Promise<string> {
-  const bytes = typeof buf === 'string' ? new TextEncoder().encode(buf) : buf
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
-}

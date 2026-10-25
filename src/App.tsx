@@ -1,16 +1,20 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { HashRouter, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { FeedbackProvider } from './components/feedback'
 import ThemePicker from './components/ThemePicker'
-import ChangeLogPage from './pages/ChangeLogPage'
-import ChecksPage from './pages/ChecksPage'
-import HomePage from './pages/HomePage'
-import ImpactPage from './pages/ImpactPage'
-import MastersPage from './pages/MastersPage'
-import MaterialsPage from './pages/MaterialsPage'
-import PackagePage from './pages/package/PackagePage'
-import PolicyPage from './pages/PolicyPage'
-import ProgressPage from './pages/ProgressPage'
-import WorkPage from './pages/work/WorkPage'
+import { Loading } from './components/ui'
+
+// 画面ごとに分けて読み込む（最初に開く画面に必要な分だけ読む）
+const ChangeLogPage = lazy(() => import('./pages/ChangeLogPage'))
+const ChecksPage = lazy(() => import('./pages/ChecksPage'))
+const HomePage = lazy(() => import('./pages/HomePage'))
+const ImpactPage = lazy(() => import('./pages/ImpactPage'))
+const MastersPage = lazy(() => import('./pages/MastersPage'))
+const MaterialsPage = lazy(() => import('./pages/MaterialsPage'))
+const PackagePage = lazy(() => import('./pages/package/PackagePage'))
+const PolicyPage = lazy(() => import('./pages/PolicyPage'))
+const ProgressPage = lazy(() => import('./pages/ProgressPage'))
+const WorkPage = lazy(() => import('./pages/work/WorkPage'))
 
 const NAV = [
   { to: '/', label: 'ホーム', end: true },
@@ -48,8 +52,10 @@ function WorkRoute() {
 export default function App() {
   return (
     <HashRouter>
+      <FeedbackProvider>
       <TitleSync />
       <div className="app">
+        <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus() }}>本文へ移動</a>
         <header className="app-header">
           <div className="brand">IFRS 調整仕訳（AJE）<span className="brand-sub">プロトタイプ・ダミーデータ</span></div>
           <nav>
@@ -59,7 +65,8 @@ export default function App() {
           </nav>
           <ThemePicker />
         </header>
-        <main className="app-main">
+        <main className="app-main" id="main" tabIndex={-1}>
+          <Suspense fallback={<Loading />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/progress" element={<ProgressPage />} />
@@ -74,8 +81,10 @@ export default function App() {
             <Route path="/logs" element={<ChangeLogPage />} />
             <Route path="/masters" element={<MastersPage />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
+      </FeedbackProvider>
     </HashRouter>
   )
 }

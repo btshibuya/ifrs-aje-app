@@ -1,7 +1,7 @@
 // 根拠をたどる：仕訳の1行 → 計算シートの行 → 明細の内訳 → 元資料（原本のハッシュ値の確認）
 // PC では画面右、スマホでは下から出るパネル
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ErrorBox, Loading, Money, formatDateTime } from '../../components/ui'
 import { useAsync } from '../../lib/hooks'
 import { contributingItems, verifySourceFile } from '../../lib/verify'
@@ -19,11 +19,18 @@ export default function TracePanel({ period, issueCode, run, entry, line, onClos
     return { steps, balances, items, files }
   }, [run.id])
 
-  // Escキーで閉じる
+  // 開いたら「閉じる」にフォーカスし、Escキーで閉じる。閉じたら開いたボタンにフォーカスを戻す
+  const closeBtn = useRef<HTMLButtonElement>(null)
+  const opener = useRef<Element | null>(document.activeElement)
   useEffect(() => {
+    closeBtn.current?.focus()
+    const back = opener.current
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      if (back instanceof HTMLElement) back.focus()
+    }
   }, [onClose])
 
   const step = data?.steps.find((s) => s.id === line.calculation_step_id)
@@ -39,10 +46,10 @@ export default function TracePanel({ period, issueCode, run, entry, line, onClos
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label="根拠をたどる">
+      <aside className="drawer" role="dialog" aria-modal="true" aria-label="根拠をたどる">
         <div className="drawer-head">
           <b>根拠をたどる</b>
-          <button className="btn btn-sm" onClick={onClose} aria-label="閉じる">閉じる</button>
+          <button ref={closeBtn} className="btn btn-sm" onClick={onClose}>閉じる</button>
         </div>
         <div className="drawer-body">
           <ol className="trace">
