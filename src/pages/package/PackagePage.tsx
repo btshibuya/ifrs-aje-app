@@ -1,15 +1,18 @@
 // 収集パッケージ：子会社の担当者が、論点ごとの様式に入力して提出する
 //   左：様式の一覧（状況つき）／右：入力欄・入力例・前期の値（前年度末または前年同期、直前四半期）
-//   スマホ幅では、様式の一覧を上の選択欄にし、提出ボタンを画面下に固定する
+//   入力者と操作ボタンは、様式の一覧の上のバーにまとめる。Excel でダウンロード・アップロードもできる
+//   スマホ幅では、様式の一覧を上の選択欄にする
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ErrorBox, Loading } from '../../components/ui'
+import { useFeedback } from '../../components/feedback'
+import { exportPackage, importPackage } from '../../lib/packageExcel'
 import { useAsync } from '../../lib/hooks'
 import { fetchMasters, type PeriodRow } from '../../lib/masters'
 import { MATERIALS, PACKAGE_FORMS, formatAsOf, quarterEnds, type PackageForm } from '../../lib/materials'
 import {
-  ENTRY_STATUS_LABELS, compareDates, fetchEntries, type CompareDates, type PackageEntry,
+  ENTRY_STATUS_LABELS, compareDates, fetchEntries, firstCompareDate, saveDraft, type CompareDates, type PackageEntry,
 } from '../../lib/package'
 import { must, supabase } from '../../lib/supabase'
 import FormEditor from './FormEditor'
@@ -33,7 +36,12 @@ export default function PackagePage() {
   const { companyCode, asOf, formCode } = useParams()
   const navigate = useNavigate()
   const [enteredBy, setEnteredBy] = useState(() => readPref('enteredBy', ''))
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   const [showExamples, setShowExamples] = useState(() => readPref('showExamples', '1') === '1')
+  const fb = useFeedback()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [excelBusy, setExcelBusy] = useState(false)
+  const [importVersion, setImportVersion] = useState(0) // Excel から取り込んだら、入力欄を作り直す
   useEffect(() => writePref('enteredBy', enteredBy), [enteredBy])
   useEffect(() => writePref('showExamples', showExamples ? '1' : '0'), [showExamples])
 
@@ -49,12 +57,23 @@ export default function PackagePage() {
 
   const detail = useAsync(async () => {
     if (!company || !period || !dates || !current) return null
-    const [entries, policies] = await Promise.all([
+    const [entries, policies, leaveItems, accounts] = await Promise.all([
       fetchEntries(company.id, [current.d, dates.priorYearEnd, dates.priorSamePeriod, dates.prevQuarter]),
-      supabase.from('v_policy_matrix').select('issue_code, applicability').eq('period_id', period.id),
+      supabase.from('v_policy_matrix').select('issue_code, applicability, params').eq('period_id', period.id),
+      // 仕訳のプレビュー用：取り込んだ有給休暇の残日数一覧
+      supabase.from('detail_items').select('data').eq('period_id', period.id).eq('issue_code', 'PAID_LEAVE'),
+      supabase.from('group_accounts').select('code, name'),
     ])
-    const applied = new Set((must(policies) as { issue_code: string; applicability: string | null }[]).filter((p) => p.applicability === 'applied').map((p) => p.issue_code))
-    return { entries, forms: PACKAGE_FORMS.filter((f) => applied.has(f.issueCode)) }
+    const pol = must(policies) as { issue_code: string; applicability: string | null; params: Record<string, unknown> }[]
+    const applied = new Set(pol.filter((p) => p.applicability === 'applied').map((p) => p.issue_code))
+    const items = must(leaveItems) as { data: Record<string, unknown> }[]
+    return {
+      entries,
+      forms: PACKAGE_FORMS.filter((f) => applied.has(f.issueCode)),
+      params: Object.fromEntries(pol.map((p) => [p.issue_code, p.params ?? {}])) as Record<string, Record<string, unknown>>,
+      leave: items.length ? { count: items.length, base: items.reduce((a, i) => a + Number(i.data.unused_days ?? 0) * Number(i.data.daily_wage ?? 0), 0) } : undefined,
+      accounts: new Map((must(accounts) as { code: string; name: string }[]).map((a) => [a.code, a.name])),
+    }
   }, [company?.id, current?.d])
 
   // この画面で保存した内容（会社・基準日が変わったら使わない）
@@ -99,6 +118,105 @@ export default function PackagePage() {
   if (!current || !period || !dates) return <ErrorBox message="この会社の決算期が登録されていません" />
 
   const go = (code: string) => navigate(`/package/${company.code}/${current.d}/${code}`)
+  const short = (d: string) => d.replaceAll('-', '/')
+
+  // Excel でダウンロード：今の入力内容・入力例・前期の値を入れたブック
+  const download = async () => {
+    setExcelBusy(true)
+    try {
+      const blob = await exportPackage({
+        companyLabel: `${company.code} ${company.name}`,
+        asOf: current.d,
+        forms: forms.map((f) => ({
+          form: f, no: issueNo(f.issueCode), data: entryOf(f.code, current.d)?.data,
+          prior: (fd) => fd.basis
+            ? [
+              { label: `${fd.basis === 'flow' ? '前年同期' : '前年度末'}（${short(firstCompareDate(fd, dates))}）`, value: entryOf(f.code, firstCompareDate(fd, dates))?.data.fields?.[fd.key] },
+              { label: `直前四半期（${short(dates.prevQuarter)}）`, value: entryOf(f.code, dates.prevQuarter)?.data.fields?.[fd.key] },
+            ]
+            : [{ label: `前回（${short(dates.prevQuarter)}）`, value: entryOf(f.code, dates.prevQuarter)?.data.fields?.[fd.key] }],
+        })),
+      })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `収集パッケージ_${company.code}_${current.d}.xlsx`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      fb.toast('Excel をダウンロードしました')
+    } catch (e) {
+      fb.toast(`ダウンロードできませんでした：${(e as Error).message}`, 'error')
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
+  // Excel から取り込む：内容を確かめてから、下書きとして保存する（提出済み・確認済みの様式は変えない）
+  const upload = async (file: File | undefined) => {
+    if (fileInput.current) fileInput.current.value = ''
+    if (!file) return
+    setExcelBusy(true)
+    try {
+      const { imported, unknownSheets } = await importPackage(file, forms)
+      if (imported.length === 0) {
+        fb.toast('取り込める様式がありませんでした（このアプリでダウンロードした Excel を使ってください）', 'error')
+        return
+      }
+      // 変わったものだけを取り込む（入力値・明細・該当なし・備考を比べる）
+      // 項目の並び順の違いは無視して比べる（DBに保存した値は項目の順が変わるため）
+      const stable = (v: unknown): unknown => (Array.isArray(v) ? v.map(stable) : v && typeof v === 'object'
+        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== null && x !== '').sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, stable(x)]))
+        : v)
+      const same = (a: unknown, b: unknown) => JSON.stringify(stable(a ?? null)) === JSON.stringify(stable(b ?? null))
+      const changed = (x: (typeof imported)[number]) => {
+        const before = entryOf(x.form.code, current.d)?.data ?? {}
+        const bf = Object.fromEntries(Object.entries(before.fields ?? {}).filter(([, v]) => v !== null && v !== ''))
+        const af = Object.fromEntries(Object.entries(x.data.fields ?? {}).filter(([, v]) => v !== null && v !== ''))
+        const bf2 = Object.fromEntries(Object.entries(bf).filter(([k]) => !x.form.fields?.find((f) => f.key === k)?.compute))
+        return !same(bf2, af) || !same(before.rows ?? [], x.data.rows ?? []) || !!before.none !== !!x.data.none || (x.data.note !== undefined && !same(before.note, x.data.note))
+      }
+      const locked = imported.filter((x) => ['submitted', 'confirmed'].includes(entryOf(x.form.code, current.d)?.status ?? '') && changed(x))
+      const targets = imported.filter((x) => !locked.includes(x) && changed(x))
+      const unchanged = imported.filter((x) => !changed(x))
+      if (targets.length === 0) {
+        fb.toast(locked.length ? '変更のある様式は提出済み・確認済みのため、取り込みませんでした' : 'Excel の内容は、今の入力と同じでした（変更なし）', 'info')
+        return
+      }
+      const ok = await fb.confirm({
+        title: 'Excel の内容を取り込みますか？',
+        confirmLabel: `${targets.length}様式を取り込む`,
+        body: (
+          <div className="import-summary">
+            <p>取り込むと、各様式の入力内容が Excel の内容に置き換わり、下書きとして保存されます（増減の理由は残します）。</p>
+            <ul>
+              {targets.map((x) => (
+                <li key={x.form.code}>
+                  <b>{issueNo(x.form.issueCode)}. {x.form.title}</b>：{x.form.fields ? `${x.filled}項目` : x.data.none ? '該当なし' : `明細 ${x.filled}行`}
+                  {x.warnings.length > 0 && <div className="small text-error">{x.warnings.slice(0, 3).join('／')}{x.warnings.length > 3 ? ` ほか${x.warnings.length - 3}件` : ''}</div>}
+                </li>
+              ))}
+            </ul>
+            {unchanged.length > 0 && <p className="small muted">変更なし（取り込まない）：{unchanged.map((x) => x.form.title).join('、')}</p>}
+            {locked.length > 0 && <p className="small muted">提出済み・確認済みのため取り込まない様式：{locked.map((x) => x.form.title).join('、')}</p>}
+            {unknownSheets.length > 0 && <p className="small muted">様式として読めなかったシート：{unknownSheets.join('、')}</p>}
+          </div>
+        ),
+      })
+      if (ok === null) return
+      fb.toast(`${targets.length}様式を取り込んでいます…`, 'info')
+      // まとめて保存する（1つずつ待たない）
+      const results = await Promise.all(targets.map((x) => {
+        const before = entryOf(x.form.code, current.d)?.data ?? {}
+        return saveDraft(company.id, current.d, x.form, { ...before, ...x.data, reasons: before.reasons }, enteredBy)
+      }))
+      setSaved((s) => ({ scope, map: { ...(s.scope === scope ? s.map : {}), ...Object.fromEntries(results.map((e) => [e.form_code, e])) } }))
+      setImportVersion((v) => v + 1)
+      fb.toast(`${targets.length}様式を取り込みました（下書き）。内容を確かめてから提出してください`)
+    } catch (e) {
+      fb.toast(`取り込めませんでした：${(e as Error).message}`, 'error')
+    } finally {
+      setExcelBusy(false)
+    }
+  }
   const done = counts.submitted + counts.confirmed
 
   return (
@@ -120,13 +238,14 @@ export default function PackagePage() {
               ))}
             </select>
           </label>
-          <label className="field-inline">
-            <span>入力者</span>
-            <input id="entered-by" value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="例：山田 花子（必須）" aria-required="true" className={enteredBy.trim() ? '' : 'needs-value'} />
-          </label>
           <label className="check-inline">
             <input type="checkbox" checked={showExamples} onChange={(e) => setShowExamples(e.target.checked)} /> 入力例を表示
           </label>
+          <div className="actions excel-actions">
+            <button className="btn" disabled={excelBusy || forms.length === 0} onClick={() => void download()}>Excel でダウンロード</button>
+            <button className="btn" disabled={excelBusy || forms.length === 0} onClick={() => fileInput.current?.click()}>Excel から取り込む</button>
+            <input ref={fileInput} type="file" accept=".xlsx" hidden onChange={(e) => void upload(e.target.files?.[0])} />
+          </div>
         </div>
       </div>
 
@@ -134,6 +253,8 @@ export default function PackagePage() {
       {detail.loading && <Loading />}
       {detail.error && <ErrorBox message={detail.error} />}
       {!detail.loading && detail.data && forms.length === 0 && <div className="alert alert-info">この会社・基準日に入力する様式はありません（収集パッケージの論点がすべて対象外です）。</div>}
+      {/* 入力者と操作ボタン（様式の画面が、ここに出す） */}
+      <div ref={setToolbarSlot} className="pkg-toolbar-slot" />
       {!detail.loading && detail.data && form && (
         <div className="pkg-body">
           <nav className="pkg-nav" aria-label="様式">
@@ -160,7 +281,7 @@ export default function PackagePage() {
             </div>
           </nav>
           <FormEditor
-            key={`${company.id}|${form.code}|${current.d}`}
+            key={`${company.id}|${form.code}|${current.d}|${importVersion}`}
             form={form}
             issueNo={issueNo(form.issueCode)}
             companyId={company.id}
@@ -169,6 +290,15 @@ export default function PackagePage() {
             entry={entryOf(form.code, current.d)}
             priorEntry={(d) => entryOf(form.code, d)}
             enteredBy={enteredBy}
+            onEnteredBy={setEnteredBy}
+            toolbarSlot={toolbarSlot}
+            previewCtx={{
+              asOf: current.d, periodStart: period.start_date,
+              taxRate: typeof detail.data.params.TAX_EFFECT?.effective_tax_rate === 'number' ? (detail.data.params.TAX_EFFECT.effective_tax_rate as number) : null,
+              params: detail.data.params, leave: detail.data.leave,
+              other: (code) => entryOf(code, current.d)?.data,
+            }}
+            accountName={(code) => detail.data!.accounts.get(code)}
             showExamples={showExamples}
             onSaved={(e) => setSaved((x) => ({ scope, map: { ...(x.scope === scope ? x.map : {}), [e.form_code]: e } }))}
             nextForm={forms[forms.indexOf(form) + 1]}

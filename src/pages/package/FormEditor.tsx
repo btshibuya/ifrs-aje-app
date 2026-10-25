@@ -2,10 +2,12 @@
 // アシスト：入力例・見る場所・用語の説明、全角や△の数字の読み替え、自動計算、整合チェック、
 //           前期から大きく変わった項目の理由入力、前回の値のコピー、自動保存
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { ErrorBox, formatDateTime } from '../../components/ui'
 import { useFeedback } from '../../components/feedback'
 import { fetchRecordLogs, type LogRow } from '../../lib/verify'
+import { FALLBACK_ACCOUNT_NAMES, previewFor, type PreviewContext, type Ref } from '../../lib/preview'
 import type { PackageForm, PkgField } from '../../lib/materials'
 import {
   ENTRY_STATUS_LABELS, UNIT, VARIANCE_THRESHOLD, describeChange, firstCompareDate, formatNumber, isNumeric, numericFields, parseNumber, saveDraft,
@@ -26,13 +28,17 @@ interface Props {
   entry?: PackageEntry
   priorEntry: (date: string) => PackageEntry | undefined
   enteredBy: string
+  onEnteredBy: (v: string) => void
+  toolbarSlot: HTMLElement | null // 様式一覧の上のバー（入力者・操作ボタン）を出す場所
+  previewCtx: PreviewContext
+  accountName: (code: string) => string | undefined
   showExamples: boolean
   onSaved: (e: PackageEntry) => void
   nextForm?: PackageForm
   onNext: (code: string) => void
 }
 
-export default function FormEditor({ form, issueNo, companyId, asOf, dates, entry, priorEntry, enteredBy, showExamples, onSaved, nextForm, onNext }: Props) {
+export default function FormEditor({ form, issueNo, companyId, asOf, dates, entry, priorEntry, enteredBy, onEnteredBy, toolbarSlot, previewCtx, accountName, showExamples, onSaved, nextForm, onNext }: Props) {
   const [data, setData] = useState<EntryData>(() => entry?.data ?? {})
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -127,20 +133,132 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
     await act(() => setEntryStatus(saved.id, 'submitted', { entered_by: enteredBy.trim() }), `「${form.title}」を提出しました`)
   }
 
+  // 仕訳のプレビュー（入力中の値で計算）と、金額を押したときの参照先の強調
+  const preview = previewFor(form, { ...data, fields }, previewCtx)
+  const [sel, setSel] = useState<{ e: number; l: number } | null>(null)
+  const selLine = sel ? preview.entries[sel.e]?.lines[sel.l] : undefined
+  const refKey = (r: Ref) => (r.row === undefined ? r.key : `${r.row}|${r.key}`)
+  const highlight = new Map<string, string>((selLine?.refs ?? []).map((r) => [refKey(r), entryColor(sel!.e)]))
+  // 項目ごとに、どの仕訳が参照しているか（項目の横に色の点で示す）
+  const usedBy = new Map<string, number[]>()
+  preview.entries.forEach((en, ei) => en.lines.forEach((ln) => ln.refs.forEach((r) => {
+    if (r.row !== undefined) return
+    const list = usedBy.get(r.key) ?? []
+    if (!list.includes(ei)) usedBy.set(r.key, [...list, ei])
+  })))
+  const pick = (e: number, l: number) => {
+    if (sel && sel.e === e && sel.l === l) return setSel(null)
+    setSel({ e, l })
+    const first = preview.entries[e]?.lines[l]?.refs[0]
+    if (!first) return
+    if (first.row === undefined) document.getElementById(`pf-${first.key}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    else document.getElementById(`pt-${first.row}-${form.table?.keyColumn}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'start' })
+  }
+  useEffect(() => {
+    if (!sel) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [sel])
+  const hl = (key: string): CSSProperties | undefined => (highlight.has(key) ? ({ '--ref-color': highlight.get(key) } as CSSProperties) : undefined)
+
   const filledCount = form.fields
     ? form.fields.filter((f) => !f.compute && fields[f.key] !== null && fields[f.key] !== undefined && fields[f.key] !== '').length
     : (data.rows ?? []).length
   const totalCount = form.fields ? form.fields.filter((f) => !f.compute).length : null
 
+  const confirmEntry = () => { if (!needName()) void act(() => setEntryStatus(entry!.id, 'confirmed', { confirmed_by: enteredBy.trim() }), '確認済にしました') }
+  const returnEntry = async () => {
+    if (needName()) return
+    const note = await fb.confirm({
+      title: '差し戻しますか？', confirmLabel: '差し戻す', danger: true,
+      body: <p>様式は「入力中」に戻り、担当者の画面に理由が表示されます。</p>,
+      input: { label: '差し戻す理由', placeholder: '例：割引率の根拠資料を添付してください' },
+    })
+    if (note) await act(() => setEntryStatus(entry!.id, 'draft', { return_note: note, confirmed_by: enteredBy.trim() }), '差し戻しました')
+  }
+
+  const toolbar = (
+    <div className="pkg-toolbar" role="toolbar" aria-label="入力者と操作">
+      <label className="field-inline pkg-toolbar-name">
+        <span>入力者<span className="req">必須</span></span>
+        <input id="entered-by" value={enteredBy} onChange={(e) => onEnteredBy(e.target.value)} placeholder="例：山田 花子" aria-required="true" className={enteredBy.trim() ? '' : 'needs-value'} />
+      </label>
+      <div className="pkg-toolbar-state">
+        <span className={`badge mst-badge-${status}`}>{ENTRY_STATUS_LABELS[status]}</span>
+        <span className="small muted">
+          {totalCount !== null ? `入力 ${filledCount}/${totalCount}項目` : `明細 ${filledCount}行`}
+          {' ・ '}
+          {saving ? '保存中…' : dirty ? '未保存の変更あり' : savedAt ? `保存済み ${formatDateTime(savedAt)}` : 'まだ保存していません'}
+        </span>
+      </div>
+      <div className="pkg-toolbar-actions">
+        <div className="actions" aria-label="担当者の操作">
+          {!readOnly && <button className="btn" disabled={saving || !dirty} onClick={() => void save()}>下書き保存</button>}
+          {!readOnly && <button className="btn btn-primary" disabled={saving} onClick={() => void submit()}>提出する</button>}
+          {status === 'submitted' && <button className="btn" onClick={() => act(() => setEntryStatus(entry!.id, 'draft'), '提出を取り消しました')}>提出を取り消す</button>}
+          {nextForm && <button className={`btn${readOnly ? ' btn-primary' : ''}`} onClick={() => onNext(nextForm.code)}>次の様式へ ›</button>}
+        </div>
+        {(status === 'submitted' || status === 'confirmed') && (
+          <div className="actions parent-actions" aria-label="親会社の操作">
+            <span className="small muted">親会社：</span>
+            {status === 'submitted' && <button className="btn btn-primary" onClick={confirmEntry}>確認済にする</button>}
+            <button className="btn btn-danger-outline" onClick={() => void returnEntry()}>差し戻す</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const previewCard = (
+    <aside className="pkg-preview" aria-label="仕訳のプレビュー">
+      <div className="pkg-preview-head">
+        <b>仕訳のプレビュー</b>
+        <span className="small muted">入力中の値で計算（簡易）。金額を押すと、参照している入力欄を色で示します。</span>
+      </div>
+      {preview.message && <p className="small pkg-preview-msg">{preview.message}</p>}
+      {preview.entries.map((en, ei) => (
+        <div className="pv-entry" key={ei} style={{ '--ref-color': entryColor(ei) } as CSSProperties}>
+          <div className="pv-title"><span className="pv-dot" aria-hidden />{en.title}</div>
+          {en.note && <div className="small muted">{en.note}</div>}
+          <ul className="pv-lines">
+            {en.lines.map((ln, li) => {
+              const on = sel?.e === ei && sel.l === li
+              return (
+                <li key={li} className={`pv-line pv-${ln.side}${on ? ' pv-on' : ''}`}>
+                  <span className="pv-side">{ln.side === 'debit' ? '借方' : '貸方'}</span>
+                  <span className="pv-account">{accountName(ln.account) ?? FALLBACK_ACCOUNT_NAMES[ln.account] ?? ln.account}</span>
+                  <button className={`pv-amount${on ? ' on' : ''}`} onClick={() => pick(ei, li)} aria-pressed={on}
+                    title={ln.formula}>
+                    {ln.amount.toLocaleString('ja-JP')}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          {sel?.e === ei && selLine && (
+            <div className="pv-formula small">
+              <b>計算：</b>{selLine.formula}
+              {selLine.external.length > 0 && <div className="muted">様式の外の値：{selLine.external.join('、')}</div>}
+            </div>
+          )}
+        </div>
+      ))}
+    </aside>
+  )
+
   return (
     <section className="pkg-form" aria-label={form.title}>
+      {toolbarSlot && createPortal(toolbar, toolbarSlot)}
       <div className="pkg-form-head">
         <div>
           <h2><span className="issue-no-sm">{issueNo}</span>{form.title}</h2>
           <p className="small">{form.intro}</p>
         </div>
-        <span className={`badge mst-badge-${status}`}>{ENTRY_STATUS_LABELS[status]}</span>
       </div>
+      <div className="pkg-form-grid">
+      {previewCard}
+      <div className="pkg-form-main">
 
       {entry?.return_note && status === 'draft' && (
         <div className="alert alert-warn"><b>親会社から差し戻されました：</b>{entry.return_note}</div>
@@ -169,11 +287,17 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
             const big = !f.compute && vr !== null && Math.abs(vr) >= VARIANCE_THRESHOLD
             const pr = problemFor(f.key)
             return (
-              <div className={`pf-row${pr && showProblems ? ' has-problem' : ''}`} role="row" key={f.key} id={`pf-${f.key}`}>
+              <div className={`pf-row${pr && showProblems ? ' has-problem' : ''}${highlight.has(f.key) ? ' ref-on' : ''}`} role="row" key={f.key} id={`pf-${f.key}`} style={hl(f.key)}>
                 <div className="pf-label" role="cell">
-                  <div><b>{f.label}</b>{f.required && !f.compute && <span className="req">必須</span>}{f.basis && <span className="basis">{f.basis === 'stock' ? 'BS' : 'PL'}</span>}</div>
+                  <div>
+                    {(usedBy.get(f.key) ?? []).map((ei) => (
+                      <button key={ei} className="ref-dot" style={{ background: entryColor(ei) }} title={`仕訳のプレビュー「${preview.entries[ei].title}」で使う`}
+                        aria-label={`仕訳「${preview.entries[ei].title}」で使う`} onClick={() => pick(ei, 0)} />
+                    ))}
+                    <b>{f.label}</b>{f.required && !f.compute && <span className="req">必須</span>}{f.basis && <span className="basis">{f.basis === 'stock' ? 'BS' : 'PL'}</span>}</div>
                   <div className="small pf-help">{f.help}</div>
                   {f.where && <div className="small muted">見る場所：{f.where}</div>}
+                  {highlight.has(f.key) && <div className="ref-tag">仕訳のプレビューで参照</div>}
                 </div>
                 <div className="pf-input" role="cell">
                   <FieldInput field={f} value={fields[f.key]} disabled={readOnly || !!f.compute}
@@ -242,7 +366,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
 
       {form.table && (
         <TableEditor form={form} data={data} readOnly={readOnly} showExamples={showExamples} dates={dates} priorEntry={priorEntry}
-          showProblems={showProblems} problems={problems} update={update} />
+          showProblems={showProblems} problems={problems} update={update} highlight={highlight} />
       )}
 
       <label className="pf-note">
@@ -258,39 +382,10 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
         </div>
       )}
 
-      <div className="pkg-actionbar">
-        <div className="small muted">
-          {totalCount !== null ? `入力 ${filledCount}/${totalCount}項目` : `明細 ${filledCount}行`}
-          {' ・ '}
-          {saving ? '保存中…' : dirty ? '未保存の変更あり' : savedAt ? `保存済み ${formatDateTime(savedAt)}` : 'まだ保存していません'}
-        </div>
-        <div className="actions">
-          {!readOnly && <button className="btn" disabled={saving || !dirty} onClick={() => void save()}>下書き保存</button>}
-          {!readOnly && <button className="btn btn-primary" disabled={saving} onClick={() => void submit()}>提出する</button>}
-          {status === 'submitted' && <button className="btn" onClick={() => act(() => setEntryStatus(entry!.id, 'draft'), '提出を取り消しました')}>提出を取り消す</button>}
-          {readOnly && nextForm && <button className="btn btn-primary" onClick={() => onNext(nextForm.code)}>次の様式へ：{nextForm.title}</button>}
-        </div>
-      </div>
-
       {entry && <PackageHistory form={form} entryId={entry.id} version={entry.updated_at} />}
 
-      {(status === 'submitted' || status === 'confirmed') && (
-        <div className="card parent-review">
-          <div className="card-title">親会社の確認 <span className="small muted">（親会社の担当者が操作します）</span></div>
-          <div className="actions">
-            {status === 'submitted' && <button className="btn btn-primary" onClick={() => { if (!needName()) void act(() => setEntryStatus(entry!.id, 'confirmed', { confirmed_by: enteredBy.trim() }), '確認済にしました') }}>確認済にする</button>}
-            <button className="btn btn-danger-outline" onClick={async () => {
-              if (needName()) return
-              const note = await fb.confirm({
-                title: '差し戻しますか？', confirmLabel: '差し戻す', danger: true,
-                body: <p>様式は「入力中」に戻り、担当者の画面に理由が表示されます。</p>,
-                input: { label: '差し戻す理由', placeholder: '例：割引率の根拠資料を添付してください' },
-              })
-              if (note) await act(() => setEntryStatus(entry!.id, 'draft', { return_note: note, confirmed_by: enteredBy.trim() }), '差し戻しました')
-            }}>差し戻す</button>
-          </div>
-        </div>
-      )}
+      </div>
+      </div>
     </section>
   )
 }
@@ -362,10 +457,11 @@ function CompareValue({ label, field, value }: { label: string; field: PkgField;
 // 明細の様式（行を追加して入力）。スマホ幅では1行を1枚のカードにする
 // ---------------------------------------------------------------------------
 
-function TableEditor({ form, data, readOnly, showExamples, dates, priorEntry, showProblems, problems, update }: {
+function TableEditor({ form, data, readOnly, showExamples, dates, priorEntry, showProblems, problems, update, highlight }: {
   form: PackageForm; data: EntryData; readOnly: boolean; showExamples: boolean; dates: CompareDates
   priorEntry: (date: string) => PackageEntry | undefined; showProblems: boolean; problems: Problem[]
   update: (fn: (d: EntryData) => EntryData) => void
+  highlight: Map<string, string>
 }) {
   const t = form.table!
   const rows = data.rows ?? []
@@ -411,14 +507,17 @@ function TableEditor({ form, data, readOnly, showExamples, dates, priorEntry, sh
                 {rows.map((r, i) => {
                   const k = keyOf(r)
                   return (
-                    <tr key={i} id={`pf-rows.${i}`}>
+                    <tr key={i} id={`pf-rows.${i}`} className={[...highlight.keys()].some((k) => k.startsWith(`${i}|`)) ? 'ref-row' : ''}
+                      style={[...highlight.entries()].find(([k]) => k.startsWith(`${i}|`)) ? ({ '--ref-color': [...highlight.entries()].find(([k]) => k.startsWith(`${i}|`))![1] } as CSSProperties) : undefined}>
                       <td className="pt-no">{i + 1}</td>
                       {t.columns.map((c) => {
                         const pr = showProblems ? problems.find((p) => p.key === `rows.${i}.${c.key}`) : undefined
                         const p1 = c.basis && k ? priorRow(firstCompareDate(c, dates), k)?.[c.key] : undefined
                         const p2 = c.basis && k ? priorRow(dates.prevQuarter, k)?.[c.key] : undefined
                         return (
-                          <td key={c.key} data-label={c.label} className={pr ? 'has-problem' : ''}>
+                          <td key={c.key} id={`pt-${i}-${c.key}`} data-label={c.label}
+                            className={`${pr ? 'has-problem' : ''}${highlight.has(`${i}|${c.key}`) ? ' ref-on' : ''}`}
+                            style={highlight.has(`${i}|${c.key}`) ? ({ '--ref-color': highlight.get(`${i}|${c.key}`) } as CSSProperties) : undefined}>
                             <FieldInput field={c} value={r[c.key]} disabled={readOnly} compact onChange={(v) => setCell(i, c.key, v)} />
                             {c.basis && (p1 !== undefined || p2 !== undefined) && (
                               <div className="pt-prior small muted">
@@ -543,4 +642,10 @@ function PackageHistory({ form, entryId, version }: { form: PackageForm; entryId
       <p className="small muted">記録はDBが自動で残します（画面からは変更できません）。</p>
     </details>
   )
+}
+
+// 仕訳ごとの色（分類の色を決まった順に使う。8件を超えることはない想定で、超えた分は最後の色）
+const ENTRY_COLORS = ['var(--cat-1)', 'var(--cat-2)', 'var(--cat-3)', 'var(--cat-4)', 'var(--cat-5)', 'var(--cat-6)', 'var(--cat-7)', 'var(--cat-8)']
+function entryColor(i: number) {
+  return ENTRY_COLORS[Math.min(i, ENTRY_COLORS.length - 1)]
 }

@@ -351,7 +351,6 @@ input:disabled, select:disabled, textarea:disabled { background: #f5f6f8; color:
 .pt-table td.has-problem { background: #fff8f7; }
 .pt-prior { margin-top: 2px; white-space: nowrap; }
 
-.pkg-actionbar { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--surface); border-top: 1px solid var(--border); padding: 10px 0 2px; z-index: 5; }
 .parent-review { background: #fafbfc; }
 
 .statement-group tr.subtotal td { background: #fafbfc; font-weight: 600; }
@@ -391,10 +390,6 @@ input:disabled, select:disabled, textarea:disabled { background: #f5f6f8; color:
   .pt-table tr.pt-example td[data-label]::before { display: inline; content: attr(data-label) '：'; }
   .pt-table tr.pt-example td + td::after { content: '　'; }
   .pt-table tr.pt-example td:last-child { display: none; }
-  .pkg-actionbar { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 12px rgba(0, 0, 0, .08); }
-  .pkg-actionbar .actions { width: 100%; }
-  .pkg-actionbar .actions .btn { flex: 1; }
-  .pkg { padding-bottom: 110px; }
 }
 .master-material { border-top: 1px solid var(--border); padding: 8px 0; }
 .master-material:first-of-type { border-top: none; }
@@ -621,3 +616,61 @@ input.needs-value { border-color: #e0a100; background: #fffaf0; }
   .report-section { border-color: #bbb; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* 収集パッケージ：上のバー（入力者・状況・操作）と仕訳のプレビュー ------------------------ */
+:root {
+  /* 仕訳ごとの色（分類の色。決まった順に使う。検証ツールで確認済み。色だけに頼らず、仕訳名・計算式も出す） */
+  --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a; --cat-4: #eda100;
+  --cat-5: #e87ba4; --cat-6: #008300; --cat-7: #6250d6; --cat-8: #e34948;
+}
+.pkg-toolbar-slot { position: sticky; top: 0; z-index: 30; margin-bottom: 12px; }
+.pkg-toolbar { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
+.pkg-toolbar-name input { width: 170px; }
+.pkg-toolbar-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pkg-toolbar-actions { margin-left: auto; display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; }
+.pkg-toolbar-actions .actions { margin: 0; }
+.parent-actions { border-left: 1px solid var(--border); padding-left: 12px; }
+.pkg-nav { top: 76px; }
+
+.pkg-form-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.pkg-form-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pkg-preview { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: #fcfcfb; display: flex; flex-direction: column; gap: 10px; }
+.pkg-preview-head { display: flex; flex-direction: column; gap: 2px; }
+.pkg-preview-msg { margin: 0; color: #3d4b5c; background: var(--tint); border-radius: 6px; padding: 6px 8px; }
+.pv-entry { border-top: 1px solid var(--border); padding-top: 8px; }
+.pv-entry:first-of-type { border-top: none; padding-top: 0; }
+.pv-title { font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.pv-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ref-color); flex: none; }
+.pv-lines { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pv-line { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 12px; padding: 2px 4px; border-radius: 4px; }
+.pv-line.pv-credit .pv-account { padding-left: 1.2em; }
+.pv-side { color: var(--muted); font-size: 11px; }
+.pv-account { line-height: 1.35; }
+.pv-amount { font: inherit; font-variant-numeric: tabular-nums; border: 1px solid transparent; background: none; color: var(--text); cursor: pointer; padding: 1px 6px; border-radius: 4px; border-bottom: 2px solid var(--ref-color); }
+.pv-amount:hover { background: var(--hover-bg); }
+.pv-amount.on { background: color-mix(in srgb, var(--ref-color) 22%, #fff); color: var(--text); box-shadow: inset 0 0 0 2px var(--ref-color); font-weight: 700; }
+.pv-line.pv-on { background: var(--hover-bg); }
+tr.ref-row > td { background: color-mix(in srgb, var(--ref-color) 6%, transparent); }
+.pv-formula { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--ref-color); background: var(--hover-bg); border-radius: 0 6px 6px 0; }
+.ref-on { box-shadow: inset 0 0 0 2px var(--ref-color); background: color-mix(in srgb, var(--ref-color) 9%, transparent) !important; border-radius: 6px; transition: background .2s; }
+td.ref-on { border-radius: 0; }
+.ref-tag { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--text); background: color-mix(in srgb, var(--ref-color) 22%, #fff); border-left: 3px solid var(--ref-color); border-radius: 4px; padding: 1px 6px; }
+.ref-dot { width: 10px; height: 10px; border-radius: 50%; border: none; padding: 0; margin-right: 4px; cursor: pointer; vertical-align: 1px; }
+@media (min-width: 1280px) {
+  /* PC：入力欄の右に、仕訳のプレビューを並べる（入力しながら見られる） */
+  .pkg-form-grid { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+  .pkg-preview { order: 2; position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; }
+  .pkg-form-main { order: 1; }
+  .pf-row { grid-template-columns: minmax(0, 1.2fr) minmax(170px, 1fr) minmax(170px, 1fr); }
+}
+@media (max-width: 640px) {
+  .pkg-toolbar-slot { top: 0; }
+  .pkg-toolbar { padding: 8px 10px; }
+  .pkg-toolbar-name { width: 100%; }
+  .pkg-toolbar-name input { flex: 1; width: auto; }
+  .pkg-toolbar-actions { margin-left: 0; width: 100%; }
+  .pkg-toolbar-actions .actions { width: 100%; }
+  .pkg-toolbar-actions .actions .btn { flex: 1; }
+  .parent-actions { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 6px; }
+}
+@media print { .pkg-toolbar-slot, .pkg-preview .pv-amount { position: static; } }
