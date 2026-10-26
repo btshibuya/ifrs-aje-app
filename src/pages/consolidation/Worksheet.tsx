@@ -11,6 +11,11 @@ import {
 
 export type Axis = 'kind' | 'issue' | 'company'
 const AXIS_LABELS: Record<Axis, string> = { kind: '仕訳の種類', issue: '論点別', company: '会社別' }
+const KIND_HELP: Record<Kind, string> = {
+  opening: '前年度までの調整を期首に入れる仕訳（累積は累計、洗替は前年度末の全額。損益は利益剰余金に置き換え）',
+  realization: '洗替の論点で、前年度末の全額を期首に戻し入れる仕訳',
+  current: '選んだ時点の各社の計算の仕訳（四半期は期首からの累計）',
+}
 const SECTIONS: Section[] = ['asset', 'liability', 'equity', 'pl', 'oci']
 
 const fmt = (v: number) => Math.round(Math.abs(v)).toLocaleString('ja-JP')
@@ -149,7 +154,7 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
               <tr>
                 <th className="ws-acc">科目</th>
                 {cols.map((c) => (
-                  <th key={c} className={`num ws-col${axis === 'kind' ? ` kind-${c}` : ''}`} title={colLabel(c)}>
+                  <th key={c} className={`num ws-col${axis === 'kind' ? ` kind-${c}` : ''}`} title={axis === 'kind' ? KIND_HELP[c as Kind] : colLabel(c)}>
                     {axis === 'kind' && <span className={`kind-dot kind-${c}`} aria-hidden />}{colShort(c)}
                   </th>
                 ))}

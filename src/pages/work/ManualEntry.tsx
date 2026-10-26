@@ -66,6 +66,8 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
       const v = i.data[c.key]
       if (v === null || v === undefined) return [c.key, '']
       if (c.type === 'date') return [c.key, String(v).replaceAll('-', '/').slice(0, isAgg && c.key === 'acquired_on' ? 7 : 10)]
+      // 自動計算した日額給与は空欄に戻す（残日数を変えたら計算し直す）
+      if (c.key === 'daily_wage' && i.data.wage_auto) return [c.key, '']
       if (c.type === 'number') return [c.key, fmtNum(Number(v))]
       return [c.key, String(v)]
     })))
@@ -103,6 +105,7 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
     // 加重平均の補助：残日数×日額給与の合計 ÷ 残日数の合計
     if (agg.helper === 'weighted_wage' && isAgg && typeof data.wage_base === 'number' && typeof data.unused_days === 'number' && data.unused_days > 0 && (data.daily_wage === null || data.daily_wage === undefined)) {
       data.daily_wage = Math.round((data.wage_base / data.unused_days) * 100) / 100
+      data.wage_auto = true
     }
     if (isAgg && agg.autoKey === 'asset_group' && data.asset_type && data.acquired_on) {
       data[cfg.keyField] = `${String(data.asset_type)}-${String(data.acquired_on).slice(0, 7)}${data.disposed_on ? `-除却${String(data.disposed_on).slice(0, 7)}` : ''}`
@@ -178,7 +181,7 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
       body: (
         <ul>
           <li>この期・論点の明細を、入力した内容で入れ替えます{items.length ? `（いまの明細 ${items.length}件は置き換わります）` : ''}。</li>
-          <li>確定前の計算は削除されます。保存したあと「明細チェック」→「計算シート」へ進みます。</li>
+          <li>確定前の計算は「再計算待ち」になります（再計算するまで、前の仕訳が連結精算表に残ります）。保存したあと「明細チェック」→「計算シート」へ進みます。</li>
           <li>入力内容はCSVにして元資料として保存し、ハッシュ値で書き換えがないことを確かめられます。</li>
         </ul>
       ),

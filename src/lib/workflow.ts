@@ -150,11 +150,51 @@ const findDuplicates = (rows: { itemKey: string }[]) => {
   return [...dup]
 }
 
-export async function previewImport(period: Period, cfg: IssueConfig, file: File): Promise<ImportPreview> {
+// 列名の言い換え（列マッピングと違う列名のファイルで、候補を自動で選ぶ）
+const SYNONYMS: Record<string, string[]> = {
+  employee_no: ['社員番号', '社員コード', '従業員番号', '従業員コード', '社員No', '個人コード', 'ID'],
+  name: ['氏名', '名前', '資産名', '資産名称', '名称'],
+  unused_days: ['有給残日数', '残日数', '有給残', '残高日数', '未消化日数'],
+  daily_wage: ['日額給与', '日額', '日給', '日額単価', '1日あたり'],
+  asset_no: ['資産番号', '資産コード', '資産No', '固定資産番号'],
+  asset_type: ['資産種類', '種類', '勘定科目', '資産区分'],
+  acquired_on: ['取得年月日', '取得日', '取得年月', '事業供用日'],
+  cost: ['取得価額', '取得価格', '取得原価'],
+  jgaap_life: ['耐用年数'],
+  jgaap_opening_bv: ['期首帳簿価額', '期首簿価', '期首残高'],
+  jgaap_depreciation: ['当期償却額', '償却額', '減価償却費'],
+  jgaap_closing_bv: ['期末帳簿価額', '期末簿価', '期末残高'],
+  disposed_on: ['除却年月日', '除却日', '売却日'],
+}
+
+// 見出しの行と列の対応の候補：列マッピングの列名、なければ言い換えで探す。見出しは先頭10行から、合う列が最も多い行
+export function suggestMapping(table: unknown[][], cfg: IssueConfig, base: Record<string, string>) {
+  const norm = (v: unknown) => String(v ?? '').trim()
+  let best = { row: 1, score: -1, mapping: base }
+  for (let r = 1; r <= Math.min(10, table.length); r++) {
+    const headers = (table[r - 1] ?? []).map(norm).filter((h) => h !== '')
+    const mapping: Record<string, string> = {}
+    let score = 0
+    for (const f of cfg.fields) {
+      const exact = headers.find((h) => h === base[f.key])
+      const syn = exact ?? (SYNONYMS[f.key] ?? []).map((w) => headers.find((h) => h === w) ?? headers.find((h) => h.includes(w))).find(Boolean)
+      if (syn && !Object.values(mapping).includes(syn)) { mapping[f.key] = syn; score += f.required ? 2 : 1 }
+    }
+    if (score > best.score) best = { row: r, score, mapping }
+  }
+  return best
+}
+
+export async function previewImport(period: Period, cfg: IssueConfig, file: File): Promise<ImportPreview & { suggested: boolean }> {
   const mapping = await fetchColumnMapping(period, cfg.sourceKind)
   const { readRows } = await loadParser()
   const table = await readRows(file)
-  return remapPreview(cfg, { file, buf: await file.arrayBuffer(), table, mappingScope: mapping.scope }, mapping.header_row, mapping.mapping)
+  const base = { file, buf: await file.arrayBuffer(), table, mappingScope: mapping.scope }
+  const first = await remapPreview(cfg, base, mapping.header_row, mapping.mapping)
+  if (first.missingColumns.length === 0) return { ...first, suggested: false }
+  // 列名が合わないときは、見出しの行と列の候補を自動で選んで読み直す（画面で確かめて直せる）
+  const s = suggestMapping(table, cfg, mapping.mapping)
+  return { ...(await remapPreview(cfg, base, s.row, s.mapping)), suggested: true }
 }
 
 // 見出しの行・列の対応を変えて読み直す（ファイルは読み直さない）
@@ -187,7 +227,7 @@ export interface RowsToSave {
   rows: { rowNo: number; itemKey: string; data: Record<string, unknown> }[]
 }
 
-// 取込を確定する：原本を保存し、明細を入れ替える（確定前の計算は削除する）
+// 取込を確定する：原本を保存し、明細を入れ替える（確定前の計算は「再計算待ち」として残す）
 export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPreview) {
   const ext = p.file.name.split('.').pop()?.toLowerCase() ?? 'bin'
   return commitRows(period, cfg, {
@@ -209,15 +249,19 @@ export async function commitRows(period: Period, cfg: IssueConfig, p: RowsToSave
     }).select('id').single(),
   ) as { id: string }
 
-  // 仕訳明細が計算ステップを参照しているため、計算より先に仕訳を消す（同時の連鎖削除では外部キー違反になる）
+  // 置き換え済みの古い計算は消す（仕訳明細が計算ステップを参照しているため、計算より先に仕訳を消す）
   const oldRuns = must(
-    await supabase.from('calculation_runs').select('id').eq('period_id', period.id).eq('issue_code', cfg.code).neq('status', 'final'),
-  ) as { id: string }[]
-  if (oldRuns.length > 0) {
-    const ids = oldRuns.map((r) => r.id)
-    must(await supabase.from('journal_entries').delete().in('run_id', ids))
-    must(await supabase.from('calculation_runs').delete().in('id', ids))
+    await supabase.from('calculation_runs').select('id, status').eq('period_id', period.id).eq('issue_code', cfg.code).neq('status', 'final'),
+  ) as { id: string; status: string }[]
+  const superseded = oldRuns.filter((r) => r.status === 'superseded').map((r) => r.id)
+  if (superseded.length > 0) {
+    must(await supabase.from('journal_entries').delete().in('run_id', superseded))
+    must(await supabase.from('calculation_runs').delete().in('id', superseded))
   }
+  // いまの下書きの計算は「再計算待ち」として残す（仕訳は再計算するまで連結精算表に残り、再計算のときに上書き前後を比べられる）
+  // 明細を入れ替えるため、計算シートから明細への参照だけを外す
+  const drafts = oldRuns.filter((r) => r.status === 'draft').map((r) => r.id)
+  if (drafts.length > 0) must(await supabase.from('calculation_steps').update({ detail_item_id: null }).in('run_id', drafts))
   must(await supabase.from('detail_items').delete().eq('period_id', period.id).eq('issue_code', cfg.code))
   if (p.rows.length > 0) {
     must(

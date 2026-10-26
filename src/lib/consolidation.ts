@@ -170,6 +170,7 @@ export interface Target {
   priorYears: PeriodRow[]
   status: Map<string, 'draft' | 'final'> // 論点 → 当期の計算の状況
   missing: string[] // 計算まで実装している論点のうち、適用なのに当期の計算がない論点
+  stale: string[] // 計算のあとで明細が入れ替わり、再計算を待っている論点（前の仕訳のまま集計している）
 }
 
 export interface Snapshot { id: string; as_of: string; label: string; lines: CLine[]; note: string | null; created_by: string | null; created_at: string }
@@ -194,7 +195,7 @@ export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<Con
     const period = m.periodFor(c.id, slot)
     if (!period) continue
     const priorYears = m.periods.filter((p) => p.company_id === c.id && p.period_type === 'FY' && p.end_date < period.start_date)
-    targets.push({ company: c, period, priorYears, status: new Map(), missing: [] })
+    targets.push({ company: c, period, priorYears, status: new Map(), missing: [], stale: [] })
   }
   const periodIds = targets.flatMap((t) => [t.period.id, ...t.priorYears.map((p) => p.id)])
   // 連結の基準日：親会社（3月決算）の時点。決算日が違う会社（12月決算）は3か月前の期を使う
@@ -202,7 +203,7 @@ export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<Con
   const rep = targets.find((t) => t.period.end_date === asOf)
   const label = rep?.period.label ?? ''
 
-  const [runs, cats, accs, snaps, pols] = await Promise.all([
+  const [runs, cats, accs, snaps, pols, wss] = await Promise.all([
     periodIds.length
       ? supabase.from('calculation_runs').select('id, period_id, issue_code, status').in('period_id', periodIds).in('status', ['draft', 'final'])
       : Promise.resolve({ data: [], error: null }),
@@ -213,7 +214,11 @@ export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<Con
     targets.length
       ? supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').in('period_id', targets.map((t) => t.period.id)).in('issue_code', implementedIssues).eq('applicability', 'applied')
       : Promise.resolve({ data: [], error: null }),
+    targets.length
+      ? supabase.from('work_status').select('period_id, issue_code, status').in('period_id', targets.map((t) => t.period.id))
+      : Promise.resolve({ data: [], error: null }),
   ])
+  const ws = must(wss) as { period_id: string; issue_code: string; status: string }[]
   const applied = must(pols) as { period_id: string; issue_code: string }[]
   const runRows = must(runs) as { id: string; period_id: string; issue_code: string; status: 'draft' | 'final' }[]
   const runById = new Map(runRows.map((r) => [r.id, r]))
@@ -235,6 +240,8 @@ export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<Con
   const warnings: string[] = []
   for (const t of targets) {
     for (const r of runRows) if (r.period_id === t.period.id) t.status.set(r.issue_code, r.status)
+    // 下書きの計算があるのに状況が取込済・チェック済に戻っている＝明細を入れ替えたあと、まだ再計算していない
+    t.stale = ws.filter((w) => w.period_id === t.period.id && ['imported', 'checked'].includes(w.status) && t.status.get(w.issue_code) === 'draft').map((w) => w.issue_code)
     t.missing = applied.filter((a) => a.period_id === t.period.id && !t.status.has(a.issue_code)).map((a) => a.issue_code)
     const ids = new Set([t.period.id, ...t.priorYears.map((p) => p.id)])
     const res = buildCompanyLines({
@@ -249,6 +256,8 @@ export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<Con
 
 export async function saveSnapshot(d: ConsolidationData, lines: CLine[], createdBy: string, note: string | null) {
   // 記録は集計に必要な項目だけ（表示用の摘要は持たない）
-  const slim = lines.map(({ companyId, issueCode, categoryCode, kind, account, amount, status }) => ({ companyId, issueCode, categoryCode, kind, account, amount, status }))
+  // 当期仕訳は期も残す（作業画面で、その期の仕訳が集計済みかを確かめるため）
+  const slim = lines.map(({ companyId, issueCode, categoryCode, kind, account, amount, status, periodId }) =>
+    ({ companyId, issueCode, categoryCode, kind, account, amount, status, ...(kind === 'current' ? { periodId } : {}) }))
   must(await supabase.from('consolidation_snapshots').insert({ as_of: d.asOf, label: d.label, lines: slim, created_by: createdBy, note }))
 }

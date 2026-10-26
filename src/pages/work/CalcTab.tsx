@@ -100,7 +100,8 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
         const [old, accs, snaps] = await Promise.all([
           fetchEntries(run.id),
           supabase.from('group_accounts').select('code, name, statement'),
-          supabase.from('consolidation_snapshots').select('id', { count: 'exact', head: true }).gte('as_of', period.end_date).lte('as_of', threeMonthsLater(period.end_date)),
+          supabase.from('consolidation_snapshots').select('id', { count: 'exact', head: true }).gte('as_of', period.end_date).lte('as_of', threeMonthsLater(period.end_date))
+            .filter('lines', 'cs', JSON.stringify([{ periodId: period.id, issueCode }])),
         ])
         const names = new Map((must(accs) as { code: string; name: string; statement: string }[]).map((a) => [a.code, a]))
         const net = new Map<string, { before: number; after: number }>()

@@ -20,6 +20,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
   const [method, setMethod] = useState<Method>(initial)
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [remapped, setRemapped] = useState(false)
+  const [suggested, setSuggested] = useState(false)
   const [saveMapping, setSaveMapping] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,8 +34,13 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
     setMessage(null)
     setPreview(null)
     setRemapped(false)
+    setSuggested(false)
     try {
-      setPreview(await previewImport(period, cfg, file))
+      const pv = await previewImport(period, cfg, file)
+      setPreview(pv)
+      // 候補を自動で選んだときは、列の対応を見せて確かめてもらう
+      setRemapped(pv.suggested)
+      setSuggested(pv.suggested)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -147,7 +153,9 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
               <p style={{ margin: '0 0 6px' }}>
                 {preview.missingColumns.length > 0
                   ? <><b>列名が合いません。</b>ファイルを直さずに、下でアプリの項目に当たる列を選んでください（{preview.missingColumns.length}項目）。</>
-                  : <b>列の対応を選び直しました。</b>}
+                  : suggested
+                    ? <><b>列名が列マッピングと違うため、見出しの行（{preview.headerRow}行目）と列の候補を自動で選びました。</b>例の値を見て、正しいか確かめてください。</>
+                    : <b>列の対応を選び直しました。</b>}
               </p>
               <div className="remap-grid">
                 <label className="remap-field">
@@ -157,9 +165,12 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
                 {cfg.fields.map((f) => {
                   const cur = preview.mapping[f.key] ?? ''
                   const missing = !preview.headers.includes(cur)
+                  // 選んだ列の、最初のデータ行の値（正しい列かを目で確かめる）
+                  const colIdx = (preview.table[preview.headerRow - 1] ?? []).findIndex((h) => String(h ?? '').trim() === cur)
+                  const sample = colIdx >= 0 ? preview.table.slice(preview.headerRow).find((r) => r[colIdx] !== null && String(r[colIdx] ?? '').trim() !== '')?.[colIdx] : undefined
                   return (
                     <label key={f.key} className={`remap-field${missing && f.required ? ' need' : ''}`}>
-                      <span className="small">{f.label}{f.required && <span className="req">必須</span>}</span>
+                      <span className="small">{f.label}{f.required && <span className="req">必須</span>}{sample !== undefined && <span className="muted remap-sample">例：{sample instanceof Date ? sample.toISOString().slice(0, 10) : String(sample)}</span>}</span>
                       <select value={preview.headers.includes(cur) ? cur : ''} onChange={(e) => void remap(preview.headerRow, { ...preview.mapping, [f.key]: e.target.value })}>
                         <option value="">（選んでください）</option>
                         {preview.headers.map((h) => <option key={h} value={h}>{h}</option>)}
@@ -214,7 +225,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
               {busy ? '取り込み中…' : 'この内容で取り込む'}
             </button>
             <button className="btn" onClick={() => { setPreview(null); setRemapped(false) }}>やめる</button>
-            <span className="small muted">取り込むと、この期・論点の明細と、確定前の計算を入れ替えます。原本はハッシュ値とともに保存します。</span>
+            <span className="small muted">取り込むと、この期・論点の明細を入れ替えます。確定前の計算は「再計算待ち」になり、再計算のときに上書き前後を確かめられます。原本はハッシュ値とともに保存します。</span>
           </div>
         </div>
       )}

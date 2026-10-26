@@ -8,7 +8,7 @@ export default function OverwriteImpact({ rows, consolidated }: { rows: ImpactRo
   const [all, setAll] = useState(false)
   const changed = rows.filter((r) => Math.round(r.before) !== Math.round(r.after))
   const shown = all ? rows : changed
-  const profit = (k: 'before' | 'after') => -rows.filter((r) => r.statement === 'PL').reduce((s, r) => s + r[k], 0)
+  const profit = (k: 'before' | 'after') => Math.round(-rows.filter((r) => r.statement === 'PL').reduce((s, r) => s + r[k], 0)) || 0
   const d = profit('after') - profit('before')
   return (
     <div className="overwrite">

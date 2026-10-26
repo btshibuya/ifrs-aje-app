@@ -2,7 +2,7 @@
 
 import { Link } from 'react-router-dom'
 import { StackedBar } from '../components/charts'
-import { ErrorBox, Loading, PageHeader, SlotToggle } from '../components/ui'
+import { ErrorBox, Loading, PageHeader, SlotToggle, formatDateTime } from '../components/ui'
 import { useAsync, useSlot } from '../lib/hooks'
 import { ISSUE_CONFIGS } from '../lib/issues'
 import { fetchMasters, type PeriodRow } from '../lib/masters'
@@ -22,17 +22,21 @@ export default function HomePage() {
     const m = await fetchMasters()
     const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
     const pids = periods.map((p) => p.id)
-    const [ctx, missing, unbalanced, entries] = await Promise.all([
+    // 連結の基準日（親会社の時点）の、最新の集計の記録
+    const asOf = periods.map((p) => p.end_date).sort().at(-1) ?? ''
+    const [ctx, missing, unbalanced, entries, snap] = await Promise.all([
       fetchStatusContext(pids, m.companies.map((c) => c.id), periods.map((p) => p.end_date), m.issues.map((i) => i.code)),
       supabase.from('v_missing_carryforward').select('period_id, issue_code, item_key').in('period_id', pids),
       supabase.from('v_unbalanced_entries').select('period_id, issue_code, entry_no').in('period_id', pids),
       supabase.from('package_entries').select('company_id, as_of, form_code, status, return_note').in('company_id', m.companies.map((c) => c.id)).in('as_of', periods.map((p) => p.end_date)),
+      supabase.from('consolidation_snapshots').select('created_at, created_by').eq('as_of', asOf).order('created_at', { ascending: false }).limit(1),
     ])
     return {
       m, periods, ctx,
       missing: must(missing) as { period_id: string; issue_code: string; item_key: string }[],
       unbalanced: must(unbalanced) as { period_id: string; issue_code: string; entry_no: number }[],
       entries: must(entries) as { company_id: string; as_of: string; form_code: string; status: string; return_note: string | null }[],
+      snapshot: (must(snap) as { created_at: string; created_by: string | null }[])[0] ?? null,
     }
   }, [slot])
 
@@ -56,6 +60,10 @@ export default function HomePage() {
     { key: 'import', no: 2, title: '取り込み・明細チェック', note: '親会社が内容を確認', done: reached(['checked', 'calculated', 'locked']), total: applied.length, to: '/progress' },
     { key: 'calc', no: 3, title: '計算する', note: '計算シートで根拠を確認', done: reached(['calculated', 'locked']), total: applied.length, to: '/progress' },
     { key: 'lock', no: 4, title: '仕訳を確定する', note: '確定するとDBでロック', done: reached(['locked']), total: applied.length, to: '/progress' },
+    {
+      key: 'consolidate', no: 5, title: '連結精算表で集計する', done: reached(['locked']), total: applied.length, to: '/consolidation',
+      note: data.snapshot ? `集計済み：${formatDateTime(data.snapshot.created_at)}（${data.snapshot.created_by ?? '—'}）` : 'まだ集計していません（親会社）',
+    },
   ]
 
   // いま対応が必要なこと
@@ -117,7 +125,7 @@ export default function HomePage() {
             )
           })}
         </ol>
-        <p className="small muted">2〜4 は計算まで実装している論点（有給休暇引当金・減価償却）の件数です。どの段階も、押すと一覧に移ります。</p>
+        <p className="small muted">2〜5 は計算まで実装している論点（有給休暇引当金・減価償却）の件数です。どの段階も、押すと一覧に移ります。</p>
       </section>
 
       <div className="home-grid">

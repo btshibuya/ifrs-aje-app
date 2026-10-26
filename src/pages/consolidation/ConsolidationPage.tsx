@@ -63,6 +63,18 @@ export default function ConsolidationPage() {
   const snapshot = d.snapshots.find((s) => s.id === snapId) ?? d.snapshots[0] ?? null
   const before = snapshot ? (snapshot.lines as CLine[]).filter(keep) : null
   const imp = impacts(lines, d.accounts)
+  // 前回の集計から変わった科目（チェックを入れる前でも知らせる）
+  const sig = (ls: CLine[]) => {
+    const x = new Map<string, number>()
+    for (const l of ls) { const k = `${l.account}|${l.companyId}|${l.issueCode}|${l.kind}`; x.set(k, (x.get(k) ?? 0) + l.amount) }
+    return x
+  }
+  const changedAccounts = (() => {
+    if (!before) return new Set<string>()
+    const a = sig(lines)
+    const b = sig(before)
+    return new Set([...new Set([...a.keys(), ...b.keys()])].filter((k) => Math.round(a.get(k) ?? 0) !== Math.round(b.get(k) ?? 0)).map((k) => k.split('|')[0]))
+  })()
   const impBefore = before ? impacts(before, d.accounts) : null
 
   const companyName = (id: string) => { const c = m.companies.find((x) => x.id === id); return c ? `${c.code} ${c.name}` : id }
@@ -71,8 +83,9 @@ export default function ConsolidationPage() {
   const issueName = (code: string) => { const i = issue(code); return i ? `${i.no}. ${i.name}` : code }
 
   // 集計の対象（会社×論点の計算の状況）
-  const counts = { final: 0, draft: 0, missing: 0 }
-  for (const t of d.targets) { for (const s of t.status.values()) counts[s]++; counts.missing += t.missing.length }
+  const counts = { final: 0, draft: 0, missing: 0, stale: 0 }
+  for (const t of d.targets) { for (const s of t.status.values()) counts[s]++; counts.missing += t.missing.length; counts.stale += t.stale.length }
+  const staleList = d.targets.flatMap((t) => t.stale.map((i) => ({ t, i })))
   const missingList = d.targets.flatMap((t) => t.missing.map((i) => ({ t, i })))
   // 洗替の論点で当期の計算がないと、開始実現仕訳（戻入れ）だけが入り、当期利益への影響が大きく出る
   const reversingMissing = missingList.filter(({ t, i }) => d.lines.some((l) => l.kind === 'realization' && l.companyId === t.company.id && l.issueCode === i))
@@ -151,7 +164,7 @@ export default function ConsolidationPage() {
         <div className="stat">
           <div className="stat-label">当期の計算（会社×論点）</div>
           <div className="stat-value">{counts.final}<span className="small muted"> 確定</span> {counts.draft > 0 && <span className="warn-text">{counts.draft}<span className="small"> 下書き</span></span>} {counts.missing > 0 && <span className="text-error">{counts.missing}<span className="small"> 未計算</span></span>}</div>
-          <div className="small muted">{d.targets.length}社が対象（計算まで実装している論点）</div>
+          <div className="small muted">{counts.stale > 0 ? <span className="warn-text">うち再計算待ち {counts.stale}件</span> : `${d.targets.length}社が対象（計算まで実装している論点）`}</div>
         </div>
       </div>
 
@@ -167,6 +180,12 @@ export default function ConsolidationPage() {
             ))}
           </ul>
         </details>
+      )}
+      {staleList.length > 0 && (
+        <div className="alert alert-warn">
+          <b>明細が入れ替わり、再計算を待っている会社×論点が {staleList.length}件 あります。</b>精算表は前の計算の仕訳のままです。再計算すると上書きされます：
+          {staleList.map(({ t, i }) => <a key={`${t.company.id}|${i}`} href={`#/work/${t.period.id}/${i}`} style={{ marginLeft: 8 }}>{t.company.code} {issueName(i)}</a>)}
+        </div>
       )}
       {d.warnings.length > 0 && (
         <div className="alert alert-warn">
@@ -252,6 +271,9 @@ export default function ConsolidationPage() {
                       <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
                       <b>上書き前後を表示</b>
                     </label>
+                    {changedAccounts.size > 0
+                      ? <span className="snap-changed">前回の集計のあと、{changedAccounts.size}科目の金額が変わっています</span>
+                      : <span className="small ok-text">✓ 前回の集計から変わっていません</span>}
                     <span className="small muted">
                       比べる集計：
                       <select value={snapshot.id} onChange={(e) => setSnapId(e.target.value)} className="snap-select">
