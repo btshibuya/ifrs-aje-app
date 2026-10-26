@@ -7,8 +7,8 @@ import TracePanel from './TracePanel'
 import { useFeedback } from '../../components/feedback'
 
 const CARRY_METHOD_NOTES: Record<string, string> = {
-  cumulative: '当期の変動分を出力（期首残高はBTrexの開始仕訳で入る）',
-  reversing: '当期末の全額を出力（前期分はBTrexの開始仕訳で戻し入れる）',
+  cumulative: '当期の変動分を出力（期首残高は開始仕訳で入る。連結精算表の「開始仕訳」で確認できる）',
+  reversing: '当期末の全額を出力（前期分は開始実現仕訳で戻し入れる。連結精算表の「開始実現仕訳」で確認できる）',
   reclass: '当期の全額を出力（翌期への引継ぎなし）',
 }
 

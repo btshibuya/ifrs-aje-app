@@ -774,7 +774,7 @@ tr.master-editing > td { background: var(--primary-soft); }
 .snap-select { font: inherit; font-size: 12px; margin-left: 4px; max-width: 100%; }
 
 .ws-card { padding: 12px 0 10px; }
-.ws-card > *:not(.ws-wrap) { margin-left: 14px; margin-right: 14px; }
+.ws-card > *:not(.ws-wrap):not(.drawer):not(.drawer-backdrop) { margin-left: 14px; margin-right: 14px; }
 .ws-toolbar { display: flex; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
 .ws-tools-left, .ws-tools-right { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
 .ws-compare-note { margin-bottom: 10px; }

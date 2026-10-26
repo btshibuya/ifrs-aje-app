@@ -289,7 +289,7 @@ export default function ConsolidationPage() {
             </div>
 
             <Worksheet
-              lines={lines} before={compare && before ? before : null} accounts={d.accounts} categories={d.categories}
+              title={d.label} lines={lines} before={compare && before ? before : null} accounts={d.accounts} categories={d.categories}
               axis={axis} onAxis={(a) => { setAxis(a); writePref('cons.axis', a) }}
               issueName={issueName} companyName={companyName} companyCode={companyCode}
               issueOrder={(c) => issue(c)?.no ?? 99} companyOrder={(id) => m.companies.findIndex((c) => c.id === id)}

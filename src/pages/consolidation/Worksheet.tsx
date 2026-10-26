@@ -2,12 +2,13 @@
 // 上書き前後：前回の集計と比べ、変わったセルに前の金額と差額を出す
 // セルを押すと、その金額を作っている仕訳（会社×論点×仕訳区分）を右側に出す
 
-import { useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { CARRY_METHOD_LABELS } from '../../lib/issues'
 import {
   KINDS, KIND_LABELS, SECTION_LABELS, amt, pivot, sectionOf, type Account, type CLine, type Category, type Kind, type Section,
 } from '../../lib/consolidation'
+import { exportWorksheet, type SheetRow } from '../../lib/worksheetExcel'
 
 export type Axis = 'kind' | 'issue' | 'company'
 const AXIS_LABELS: Record<Axis, string> = { kind: '仕訳の種類', issue: '論点別', company: '会社別' }
@@ -22,7 +23,8 @@ const fmt = (v: number) => Math.round(Math.abs(v)).toLocaleString('ja-JP')
 const diffText = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${fmt(v)}`
 const same = (a: number, b: number) => Math.round(a) === Math.round(b)
 
-export default function Worksheet({ lines, before, accounts, categories, axis, onAxis, issueName, companyName, companyCode, issueOrder, companyOrder, accountSort }: {
+export default function Worksheet({ title, lines, before, accounts, categories, axis, onAxis, issueName, companyName, companyCode, issueOrder, companyOrder, accountSort }: {
+  title: string
   lines: CLine[]
   before: CLine[] | null
   accounts: Map<string, Account>
@@ -40,6 +42,7 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
   const [heat, setHeat] = useState(true)
   const [changedOnly, setChangedOnly] = useState(false)
   const [drill, setDrill] = useState<{ account: string; col: string | null } | null>(null)
+  const closeDrill = useCallback(() => setDrill(null), [])
 
   const inKinds = (l: CLine) => axis === 'kind' || kinds.includes(l.kind)
   const after = lines.filter(inKinds)
@@ -78,7 +81,7 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
   const plCodes = allCodes.filter((c) => { const a = accounts.get(c); return a && sectionOf(a) === 'pl' })
   const ociCodes = allCodes.filter((c) => { const a = accounts.get(c); return a && sectionOf(a) === 'oci' })
 
-  const cell = (key: string, { a, b, onClick, strong, style }: { a: number; b: number | null; onClick?: () => void; strong?: boolean; style?: CSSProperties }) => {
+  const cell = (key: string, { a, b, onClick, strong, style, label }: { a: number; b: number | null; onClick?: () => void; strong?: boolean; style?: CSSProperties; label?: string }) => {
     const diff = b !== null && !same(a, b)
     const content = (
       <>
@@ -93,7 +96,7 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
     )
     return (
       <td key={key} className={`num ws-cell${diff ? ' ws-changed' : ''}`} style={style}>
-        {onClick && (!same(a, 0) || diff) ? <button className="ws-btn" onClick={onClick} title="内訳を見る">{content}</button> : content}
+        {onClick && (!same(a, 0) || diff) ? <button className="ws-btn" onClick={onClick} title="内訳を見る" aria-label={label ? `${label}：${amt(a, false)}円。内訳を見る` : undefined}>{content}</button> : content}
       </td>
     )
   }
@@ -109,6 +112,36 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
     el.download = `連結精算表_${AXIS_LABELS[axis]}.csv`
     el.click()
     URL.revokeObjectURL(el.href)
+  }
+
+  // Excel：画面と同じ並び（区分・小計・検証・当期利益への影響）で出す
+  const [xlsBusy, setXlsBusy] = useState(false)
+  const excel = async () => {
+    setXlsBusy(true)
+    try {
+      const rows: SheetRow[] = []
+      for (const sec of SECTIONS) {
+        const list = accs.filter((a) => sectionOf(a) === sec)
+        if (!list.length) continue
+        const codes = list.map((a) => a.code)
+        rows.push({ kind: 'section', label: SECTION_LABELS[sec], values: [] })
+        for (const a of list) rows.push({ kind: 'account', label: a.name, code: a.code, values: cols.map((c) => val(A, a.code, c)), before: B ? val(B, a.code, null) : null })
+        rows.push({ kind: 'subtotal', label: `${SECTION_LABELS[sec]} 計`, values: cols.map((c) => sumOf(A, codes, c)), before: B ? sumOf(B, codes, null) : null })
+      }
+      rows.push({ kind: 'check', label: '貸借の検証（0になる）', values: cols.map((c) => sumOf(A, allCodes, c)) })
+      rows.push({ kind: 'profit', label: '当期利益への影響', values: cols.map((c) => -sumOf(A, plCodes, c)), before: B ? -sumOf(B, plCodes, null) : null })
+      const blob = await exportWorksheet({
+        title: `連結精算表（IFRS調整）　${title}`, columns: cols.map(colLabel), rows, compare: !!B,
+        subtitle: `列：${AXIS_LABELS[axis]}${axis !== 'kind' ? `（${kinds.map((k) => KIND_LABELS[k]).join('・')}）` : ''}　出力 ${new Date().toLocaleString('ja-JP')}`,
+      })
+      const el = document.createElement('a')
+      el.href = URL.createObjectURL(blob)
+      el.download = `連結精算表_${title}_${AXIS_LABELS[axis]}.xlsx`
+      el.click()
+      URL.revokeObjectURL(el.href)
+    } finally {
+      setXlsBusy(false)
+    }
   }
 
   return (
@@ -135,7 +168,8 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
         <div className="ws-tools-right">
           <label className="check-inline small"><input type="checkbox" checked={heat} onChange={(e) => setHeat(e.target.checked)} /> 金額の大きさを色で表示</label>
           {B && <label className="check-inline small"><input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} /> 変わった科目だけ（{changedCount}）</label>}
-          <button className="btn btn-sm" onClick={csv}>CSVで出力</button>
+          <button className="btn btn-sm" onClick={() => void excel()} disabled={xlsBusy}>{xlsBusy ? '作成中…' : 'Excelで出力'}</button>
+          <button className="btn btn-sm" onClick={csv}>CSV</button>
         </div>
       </div>
       {B && (
@@ -173,9 +207,9 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
                     <tr key={a.code} className={`${changed(a.code) ? 'ws-row-changed ' : ''}${drill?.account === a.code ? 'ws-row-on' : ''}`}>
                       <th className="ws-acc" scope="row">{a.name}<span className="ws-code">{a.code}</span></th>
                       {cols.map((c) => (
-                        cell(c, { a: val(A, a.code, c), b: B ? val(B, a.code, c) : null, style: heatStyle(val(A, a.code, c)), onClick: () => setDrill({ account: a.code, col: c }) })
+                        cell(c, { a: val(A, a.code, c), b: B ? val(B, a.code, c) : null, style: heatStyle(val(A, a.code, c)), onClick: () => setDrill({ account: a.code, col: c }), label: `${a.name}・${colLabel(c)}` })
                       ))}
-                      {cell('total', { a: val(A, a.code, null), b: B ? val(B, a.code, null) : null, strong: true, onClick: () => setDrill({ account: a.code, col: null }) })}
+                      {cell('total', { a: val(A, a.code, null), b: B ? val(B, a.code, null) : null, strong: true, onClick: () => setDrill({ account: a.code, col: null }), label: `${a.name}・合計` })}
                       {B && <td className={`num ws-dcol${same(val(A, a.code, null), val(B, a.code, null)) ? '' : ' on'}`}>{same(val(A, a.code, null), val(B, a.code, null)) ? '' : diffText(val(A, a.code, null) - val(B, a.code, null))}</td>}
                     </tr>
                   ))}
@@ -237,7 +271,7 @@ export default function Worksheet({ lines, before, accounts, categories, axis, o
           after={after.filter((l) => l.account === drill.account && (drill.col === null || colOf(l) === drill.col))}
           before={prev ? prev.filter((l) => l.account === drill.account && (drill.col === null || colOf(l) === drill.col)) : null}
           categories={categories} issueName={issueName} companyName={companyName}
-          onClose={() => setDrill(null)}
+          onClose={closeDrill}
         />
       )}
     </div>
@@ -248,6 +282,12 @@ function DrillDrawer({ account, code, colLabel, after, before, categories, issue
   account: string; code: string; colLabel: string; after: CLine[]; before: CLine[] | null
   categories: Map<string, Category>; issueName: (c: string) => string; companyName: (id: string) => string; onClose: () => void
 }) {
+  // Esc で閉じる
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
   // 会社×論点×仕訳区分×種類でまとめる（上書き前後の比較もこの単位）
   type G = { key: string; l: CLine; a: number; b: number; sources: Set<string>; periodId?: string }
   const groups = new Map<string, G>()

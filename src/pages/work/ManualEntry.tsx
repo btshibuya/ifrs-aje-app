@@ -7,6 +7,8 @@ import { useFeedback } from '../../components/feedback'
 import { ErrorBox } from '../../components/ui'
 import type { FieldDef, IssueConfig } from '../../lib/issues'
 import { parseDateInput, parseNumber } from '../../lib/package'
+import { useAsync } from '../../lib/hooks'
+import { must, supabase } from '../../lib/supabase'
 import { commitRows, type ItemRow, type Period } from '../../lib/workflow'
 
 export type ManualMode = 'detail' | 'aggregate'
@@ -73,6 +75,14 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
     })))
   }
   const key = draftKey(period.id, cfg.code, mode)
+  // 資産の種類は、経済的耐用年数のマスタにある名前から選べるようにする（ない名前は計算から外れるため）
+  const types = useAsync(async () => {
+    if (!cfg.fields.some((f) => f.key === 'asset_type')) return []
+    const rows = must(await supabase.from('asset_class_rules').select('source_asset_type').eq('is_hidden', false)
+      .or(`company_id.is.null,company_id.eq.${period.company_id}`)) as { source_asset_type: string }[]
+    return [...new Set(rows.map((r) => r.source_asset_type))]
+  }, [period.company_id, cfg.code])
+  const assetTypes = types.data ?? []
   const empty = (): Cells => Object.fromEntries(cols.map((c) => [c.key, '']))
   const [rows, setRows] = useState<Cells[]>(() => {
     const d = readDraft(key)
@@ -100,7 +110,10 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
         const d = parseDateInput(raw, isAgg && c.key === 'acquired_on')
         if (d === 'error') errors[c.key] = '日付を読めません（例：2024/04/01）'
         else data[c.key] = d
-      } else data[c.key] = raw === '' ? null : raw
+      } else {
+        data[c.key] = raw === '' ? null : raw
+        if (c.key === 'asset_type' && raw !== '' && assetTypes.length && !assetTypes.includes(raw)) errors[c.key] = `経済的耐用年数のマスタにない種類です（${assetTypes.slice(0, 3).join('・')}など）`
+      }
     }
     // 加重平均の補助：残日数×日額給与の合計 ÷ 残日数の合計
     if (agg.helper === 'weighted_wage' && isAgg && typeof data.wage_base === 'number' && typeof data.unused_days === 'number' && data.unused_days > 0 && (data.daily_wage === null || data.daily_wage === undefined)) {
@@ -241,7 +254,7 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
                   {c.help && <div className="small muted manual-th-help">{c.help}</div>}
                 </th>
               ))}
-              {isAgg && agg.autoKey && <th>番号（自動）</th>}
+              {isAgg && agg.autoKey && <th className="nowrap">番号（自動）</th>}
               <th aria-label="操作" />
             </tr>
           </thead>
@@ -259,7 +272,8 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
                         <input
                           className={`manual-input${c.type === 'number' ? ' num' : ''}`} value={r[c.key] ?? ''} disabled={locked}
                           inputMode={c.type === 'number' ? 'decimal' : undefined}
-                          placeholder={auto ? `自動：${fmtNum(p.data.daily_wage as number)}` : i === 0 ? c.placeholder ?? (c.type === 'date' ? '2024/04/01' : '') : ''}
+                          placeholder={auto ? `自動：${fmtNum(p.data.daily_wage as number)}` : i === 0 ? c.placeholder ?? (c.type === 'date' ? (c.required ? '2024/04/01' : 'あれば入力') : '') : ''}
+                          list={c.key === 'asset_type' && assetTypes.length ? 'asset-types' : undefined}
                           aria-label={`${i + 1}行目 ${c.label}`} aria-invalid={!!err} title={err}
                           onChange={(e) => set(i, c.key, e.target.value)}
                           onPaste={(e) => onPaste(e, i, ci)}
@@ -291,6 +305,7 @@ export default function ManualEntry({ period, cfg, mode, items, locked, onDone }
           </tfoot>
         </table>
       </div>
+      {assetTypes.length > 0 && <datalist id="asset-types">{assetTypes.map((t) => <option key={t} value={t} />)}</datalist>}
       {error && <ErrorBox message={error} />}
       <div className="actions">
         <button className="btn" disabled={locked} onClick={() => addRows(1)}>＋ 1行追加</button>

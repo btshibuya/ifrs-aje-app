@@ -83,7 +83,7 @@ export const ISSUE_CONFIGS: Record<string, IssueConfig> = {
           asset_no: '番号（自動）', name: 'まとめの名前（任意）', acquired_on: '取得年月', cost: '取得価額の合計',
           jgaap_opening_bv: '期首帳簿価額の合計', jgaap_depreciation: '当期償却額の合計', jgaap_closing_bv: '期末帳簿価額の合計', disposed_on: '除却年月日',
         },
-        placeholders: { asset_no: '自動', name: '例：PC 2024年4月取得分', asset_type: '例：器具備品', acquired_on: '例：2024/04', cost: '例：3,600,000' },
+        placeholders: { asset_no: '自動', name: '例：PC 2024年4月取得分', asset_type: '例：工具器具備品', acquired_on: '例：2024/04', cost: '例：3,600,000' },
         autoKey: 'asset_group',
         tips: [
           '資産の種類と取得年月が同じ資産をまとめると、定額法・月割りのため、1件ずつ入れたときと同じ結果になります。',
