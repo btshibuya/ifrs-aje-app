@@ -17,6 +17,7 @@ export interface PreviewContext {
   taxRate: number | null // 実効税率（会社別方針の税効果）
   params: Record<string, Record<string, unknown>> // 論点ごとの方針の前提値
   leave?: { count: number; base: number } // 取り込んだ有給残日数一覧：人数と Σ(残日数×日額給与)
+  loading?: boolean // プレビュー用のデータを読み込み中
   other: (formCode: string) => EntryData | undefined // 同じ基準日のほかの様式
 }
 
@@ -58,6 +59,7 @@ const RULES: Record<string, Rule> = {
     const granted = num(f.granted_days)
     const used = num(f.used_days)
     const s = num(f.social_insurance_rate)
+    if (!ctx.leave && ctx.loading) return { entries: [], message: '計算に使う残日数一覧を読み込んでいます…' }
     if (!ctx.leave) return { entries: [], message: '有給休暇の残日数一覧を取り込むと、この消化率・法定福利費率で有給休暇引当金の仕訳を計算して表示します。' }
     if (!granted || used === null || s === null) return { entries: [], message: '付与日数・消化日数・法定福利費率を入力すると、仕訳を表示します。' }
     const rate = used / granted

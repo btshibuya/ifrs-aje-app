@@ -57,24 +57,32 @@ export default function PackagePage() {
 
   const detail = useAsync(async () => {
     if (!company || !period || !dates || !current) return null
-    const [entries, policies, leaveItems, accounts] = await Promise.all([
+    const [entries, policies] = await Promise.all([
       fetchEntries(company.id, [current.d, dates.priorYearEnd, dates.priorSamePeriod, dates.prevQuarter]),
       supabase.from('v_policy_matrix').select('issue_code, applicability, params').eq('period_id', period.id),
-      // 仕訳のプレビュー用：取り込んだ有給休暇の残日数一覧
-      supabase.from('detail_items').select('data').eq('period_id', period.id).eq('issue_code', 'PAID_LEAVE'),
-      supabase.from('group_accounts').select('code, name'),
     ])
     const pol = must(policies) as { issue_code: string; applicability: string | null; params: Record<string, unknown> }[]
     const applied = new Set(pol.filter((p) => p.applicability === 'applied').map((p) => p.issue_code))
-    const items = must(leaveItems) as { data: Record<string, unknown> }[]
     return {
       entries,
       forms: PACKAGE_FORMS.filter((f) => applied.has(f.issueCode)),
       params: Object.fromEntries(pol.map((p) => [p.issue_code, p.params ?? {}])) as Record<string, Record<string, unknown>>,
+    }
+  }, [company?.id, current?.d])
+
+  // 仕訳のプレビューだけで使うデータ（取り込んだ有給残日数一覧・科目名）。入力欄を先に出し、あとから読む
+  const previewData = useAsync(async () => {
+    if (!period) return null
+    const [leaveItems, accounts] = await Promise.all([
+      supabase.from('detail_items').select('data').eq('period_id', period.id).eq('issue_code', 'PAID_LEAVE'),
+      supabase.from('group_accounts').select('code, name'),
+    ])
+    const items = must(leaveItems) as { data: Record<string, unknown> }[]
+    return {
       leave: items.length ? { count: items.length, base: items.reduce((a, i) => a + Number(i.data.unused_days ?? 0) * Number(i.data.daily_wage ?? 0), 0) } : undefined,
       accounts: new Map((must(accounts) as { code: string; name: string }[]).map((a) => [a.code, a.name])),
     }
-  }, [company?.id, current?.d])
+  }, [period?.id])
 
   // この画面で保存した内容（会社・基準日が変わったら使わない）
   const scope = `${company?.id}|${current?.d}`
@@ -295,10 +303,10 @@ export default function PackagePage() {
             previewCtx={{
               asOf: current.d, periodStart: period.start_date,
               taxRate: typeof detail.data.params.TAX_EFFECT?.effective_tax_rate === 'number' ? (detail.data.params.TAX_EFFECT.effective_tax_rate as number) : null,
-              params: detail.data.params, leave: detail.data.leave,
+              params: detail.data.params, leave: previewData.data?.leave, loading: !previewData.data,
               other: (code) => entryOf(code, current.d)?.data,
             }}
-            accountName={(code) => detail.data!.accounts.get(code)}
+            accountName={(code) => previewData.data?.accounts.get(code)}
             showExamples={showExamples}
             onSaved={(e) => setSaved((x) => ({ scope, map: { ...(x.scope === scope ? x.map : {}), [e.form_code]: e } }))}
             nextForm={forms[forms.indexOf(form) + 1]}

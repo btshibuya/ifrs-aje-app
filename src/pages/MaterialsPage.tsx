@@ -30,7 +30,7 @@ export default function MaterialsPage() {
   const { data, error, loading, reload } = useAsync(async () => {
     const m = await fetchMasters()
     const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
-    const ctx = await fetchStatusContext(periods.map((p) => p.id), m.companies.map((c) => c.id), periods.map((p) => p.end_date))
+    const ctx = await fetchStatusContext(periods.map((p) => p.id), m.companies.map((c) => c.id), periods.map((p) => p.end_date), m.issues.map((i) => i.code))
     return { m, states: new Map(periods.map((p) => [p.company_id, { period: p, states: materialStates(ctx, p) }])) }
   }, [slot])
 

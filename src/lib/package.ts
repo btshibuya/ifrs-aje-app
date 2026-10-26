@@ -222,16 +222,17 @@ export interface StatusContext {
 }
 
 // 指定した期の資料の状況をまとめて読む
-export async function fetchStatusContext(periodIds: string[], companyIds: string[], asOfs: string[]): Promise<StatusContext> {
-  const [files, work, policies, entries, hidden] = await Promise.all([
+// visibleIssues：表示している論点（マスタで非表示にした論点の資料は数えない）。呼び出し側が読んだマスタから渡す
+export async function fetchStatusContext(periodIds: string[], companyIds: string[], asOfs: string[], visibleIssues: string[]): Promise<StatusContext> {
+  const [files, work, policies, entries] = await Promise.all([
     supabase.from('source_files').select('period_id, issue_code, source_kind, uploaded_at, file_name').in('period_id', periodIds).order('uploaded_at', { ascending: false }),
     supabase.from('work_status').select('period_id, issue_code, status').in('period_id', periodIds),
     supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').in('period_id', periodIds),
     supabase.from('package_entries').select('company_id, as_of, form_code, status, updated_at').in('company_id', companyIds).in('as_of', asOfs),
-    supabase.from('issues').select('code').eq('is_hidden', true),
   ])
+  const visible = new Set(visibleIssues)
   return {
-    hiddenIssues: new Set((must(hidden) as { code: string }[]).map((x) => x.code)),
+    hiddenIssues: new Set(MATERIALS.map((m) => m.issueCode).filter((c) => !visible.has(c))),
     files: must(files) as SourceFileRow[],
     work: must(work) as WorkRow[],
     policies: must(policies) as PolicyRow[],
@@ -290,7 +291,7 @@ export function summarizeCompanies(perCompany: MaterialState[][]) {
 
 // 進捗一覧などから、各社の期の資料の状況をまとめて読む
 export async function fetchAllMaterialStates(m: MasterData, periods: PeriodRow[]) {
-  const ctx = await fetchStatusContext(periods.map((p) => p.id), m.companies.map((c) => c.id), periods.map((p) => p.end_date))
+  const ctx = await fetchStatusContext(periods.map((p) => p.id), m.companies.map((c) => c.id), periods.map((p) => p.end_date), m.issues.map((i) => i.code))
   return new Map(periods.map((p) => [p.company_id, materialStates(ctx, p)]))
 }
 

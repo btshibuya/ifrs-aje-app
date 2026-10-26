@@ -23,7 +23,7 @@ export default function HomePage() {
     const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
     const pids = periods.map((p) => p.id)
     const [ctx, missing, unbalanced, entries] = await Promise.all([
-      fetchStatusContext(pids, m.companies.map((c) => c.id), periods.map((p) => p.end_date)),
+      fetchStatusContext(pids, m.companies.map((c) => c.id), periods.map((p) => p.end_date), m.issues.map((i) => i.code)),
       supabase.from('v_missing_carryforward').select('period_id, issue_code, item_key').in('period_id', pids),
       supabase.from('v_unbalanced_entries').select('period_id, issue_code, entry_no').in('period_id', pids),
       supabase.from('package_entries').select('company_id, as_of, form_code, status, return_note').in('company_id', m.companies.map((c) => c.id)).in('as_of', periods.map((p) => p.end_date)),
