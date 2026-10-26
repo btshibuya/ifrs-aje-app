@@ -10,6 +10,9 @@ import ImportTab from './ImportTab'
 import ItemsTab from './ItemsTab'
 import JournalTab from './JournalTab'
 import PeriodTimeline from './PeriodTimeline'
+import { PACKAGE_FORMS } from '../../lib/materials'
+
+const formOf = (issueCode: string) => PACKAGE_FORMS.find((f) => f.issueCode === issueCode)
 
 type TabKey = 'import' | 'items' | 'calc' | 'journal'
 const STEPS = ['imported', 'checked', 'calculated', 'locked']
@@ -35,7 +38,6 @@ export default function WorkPage() {
   }, [periodId, issueCode])
 
 
-  if (!cfg) return <ErrorBox message="この論点の作業画面はまだ実装していません" />
   if (loading && !data) return <Loading />
   if (error) return <ErrorBox message={error} />
   if (!data) return null
@@ -58,7 +60,7 @@ export default function WorkPage() {
           {issue.name} <span className="muted small">{issue.standard_ref}</span>
         </h1>
         <div className="page-header-tools">
-          {data.run && <Link className="btn" to={`/report/${period.id}/${issueCode}`}>検証レポート</Link>}
+          {data.run && cfg && <Link className="btn" to={`/report/${period.id}/${issueCode}`}>検証レポート</Link>}
         </div>
       </div>
       <PeriodTimeline timeline={data.timeline} currentId={period.id} issueCode={issueCode} />
@@ -81,6 +83,16 @@ export default function WorkPage() {
         <div className="alert alert-info">この会社・期では「{policy.applicability === 'immaterial' ? '重要性なし' : '対象外'}」です（理由：{policy.reason ?? '—'}）。デモのため作業はできます。</div>
       )}
 
+      {!cfg ? (
+        <>
+          {/* 計算をまだ実装していない論点：収集パッケージの入力から作った仕訳を見る・確定する */}
+          <div className="alert alert-info">
+            この論点は、収集パッケージの入力（{formOf(issueCode)?.title ?? '様式'}）から仕訳を作ります。計算の詳細はまだ実装しておらず、テストデータでは入力から簡易計算した仕訳を表示しています。
+            {formOf(issueCode) && <> <Link to={`/package/${period.companies.code}/${period.end_date}/${formOf(issueCode)!.code}`}>収集パッケージの入力を見る ›</Link></>}
+          </div>
+          <JournalTab period={period} issueCode={issueCode} issueName={issue.name} run={run} locked={locked} stale={false} onDone={reload} traceable={false} />
+        </>
+      ) : (<>
       <Tabs<TabKey>
         active={activeTab}
         onChange={setTab}
@@ -97,6 +109,7 @@ export default function WorkPage() {
         {activeTab === 'calc' && <CalcTab period={period} issueCode={issueCode} items={items} run={run} stale={stale} locked={locked} onDone={reload} />}
         {activeTab === 'journal' && <JournalTab period={period} issueCode={issueCode} issueName={issue.name} run={run} locked={locked} stale={stale} onDone={reload} />}
       </div>
+      </>)}
     </>
   )
 }

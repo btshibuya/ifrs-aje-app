@@ -6,8 +6,9 @@ import { KIND_LABELS, MATERIALS, formByCode } from '../lib/materials'
 import { UNIT, formatNumber, isNumeric } from '../lib/package'
 import { must, supabase } from '../lib/supabase'
 import MasterTable, { type Row } from './masters/MasterTable'
+import TestDataPanel from './masters/TestDataPanel'
 
-type Key = 'companies' | 'periods' | 'issues' | 'materials' | 'categories' | 'accounts' | 'rules' | 'columns'
+type Key = 'companies' | 'periods' | 'issues' | 'materials' | 'categories' | 'accounts' | 'rules' | 'columns' | 'testdata'
 
 const SOFTWARE = ['勘定奉行', '弥生会計', 'freee会計', 'マネーフォワード', 'PCA会計', 'その他'].map((v) => ({ value: v, label: v }))
 const BS_CLASSES = [
@@ -59,10 +60,12 @@ export default function MastersPage() {
           { key: 'accounts', label: 'グループ統一科目' },
           { key: 'rules', label: '経済的耐用年数' },
           { key: 'columns', label: '列マッピング' },
+          { key: 'testdata', label: 'テストデータ' },
         ]}
       />
       <div className="tab-body">
-        {loading && !data && <Loading />}
+        {tab === 'testdata' && <TestDataPanel onChanged={reload} />}
+        {loading && !data && tab !== 'testdata' && <Loading />}
         {error && <ErrorBox message={error} />}
         {data && tab === 'companies' && (
           <MasterTable table="companies" title="会社" pk="id" rows={data.companies} onChanged={reload}

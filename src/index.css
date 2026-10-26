@@ -857,3 +857,5 @@ tr.ws-row-on > * { background-image: linear-gradient(var(--primary-soft), var(--
 .remap-sample { margin-left: 6px; font-weight: 400; }
 .snap-changed { font-size: 12px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 2px 10px; }
 .cons-missing, .cons-alert { margin-bottom: 12px; }
+.testdata-bar { height: 10px; border-radius: 999px; background: var(--viz-st-not_started); overflow: hidden; }
+.testdata-bar > span { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width .4s; }

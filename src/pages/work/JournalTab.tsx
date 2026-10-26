@@ -40,8 +40,9 @@ function toCsv(period: Period, issueName: string, entries: EntryRow[]) {
   return '﻿' + [head, ...rows].map((r) => r.map(esc).join(',')).join('\r\n')
 }
 
-export default function JournalTab({ period, issueCode, issueName, run, locked, stale, onDone }: {
+export default function JournalTab({ period, issueCode, issueName, run, locked, stale, onDone, traceable = true }: {
   period: Period; issueCode: string; issueName: string; run: Run | null; locked: boolean; stale: boolean; onDone: () => void
+  traceable?: boolean // 根拠をたどる（明細・元資料がある論点だけ）
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,7 +55,7 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
     return { entries, steps: new Map(steps.map((s) => [s.id, s])) }
   }, [run?.id, run?.status])
 
-  if (!run) return <div className="alert alert-info">まだ計算していません。「計算」タブで計算してください。</div>
+  if (!run) return <div className="alert alert-info">{traceable ? 'まだ計算していません。「計算」タブで計算してください。' : 'まだ仕訳がありません。'}</div>
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} />
   if (!data.data) return null
@@ -155,7 +156,7 @@ export default function JournalTab({ period, issueCode, issueName, run, locked, 
                     <td className="num">{l.side === 'credit' && <Money value={l.amount} />}</td>
                     <td className="small">
                       {s ? <span title={s.formula ?? ''}>計算シート「{s.label}」<span className="muted">：{s.formula}</span></span> : ''}
-                      <button className="btn-link trace-open" onClick={() => setTrace({ entry: e, line: l })}>根拠をたどる ›</button>
+                      {traceable && <button className="btn-link trace-open" onClick={() => setTrace({ entry: e, line: l })}>根拠をたどる ›</button>}
                     </td>
                   </tr>
                 )

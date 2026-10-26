@@ -83,7 +83,7 @@
 3. 明細チェックで「すべてチェック」→ 計算シートで「計算する」→ 仕訳・確定で「この計算で確定する」
 4. 上の時点の帯で「2027年3月期 期末」に移り、「S01 2027年3月期」を取り込んで同じ操作をする
    - 旧型旋盤の除却（除却損の調整）と、台帳から消えた配送トラックの警告（期首チェック）が出る
-5. 連結精算表を開く（デモ用に S02〜S10 の前期の期末・当期の第1〜第2四半期を計算済み。S01 は手で試すため空けている）
+5. 連結精算表を開く（テストデータで、全13論点の前期・当期1Q・2Qを計算済み。S01 の有給休暇・減価償却は手で試すため空けている）
    - 「当期 2Q」で、精算表の列の切り口（仕訳の種類・論点別・会社別）を切り替え、セルを押して内訳を見る
    - 「上書き前後を表示」をオンにすると、集計のあとに S03 の有給休暇が訂正されて変わった金額（前・差額）が出る
    - 開始仕訳・開始実現仕訳のタブで、前期末からの引継ぎと洗替の戻入れを論点別・会社別に見る
@@ -113,26 +113,19 @@ main に push すると、GitHub Actions（`.github/workflows/pages.yml`）が�
 
 接続先は `src/lib/supabase.ts` にあります（公開用のキー）。環境変数 `VITE_SUPABASE_URL`・`VITE_SUPABASE_PUBLISHABLE_KEY` で上書きできます。
 
-## 試験データの片付け
+## テストデータ
 
-画面で試したデータを消して初期状態に戻すときは、Supabase の SQL Editor で次を実行します（マスタとデモ用の前期値は残ります）。
+「マスタ」画面の「テストデータ」タブで、入れる・消すができます（処理は `src/lib/testData.ts`）。
 
-```sql
-begin;
-delete from work_status where not is_demo_seed;
-delete from journal_entries where run_id in (select id from calculation_runs where not is_demo_seed);
-delete from calculation_runs where not is_demo_seed;
-delete from item_key_links;
-delete from detail_items where not is_demo_seed;
-delete from source_files where not is_demo_seed;
-delete from package_entries where not is_demo_seed;
-delete from consolidation_snapshots where not is_demo_seed;
-commit;
-```
-
-デモ用の計算データ（S02〜S10）を作り直すときは、上のSQLの `where not is_demo_seed` を外して全部消したあと、`npx vitest run --config scripts/vitest.seed.config.ts` を実行します（アプリと同じ取込・計算・確定の処理で作ります）。
-
-取り込んだ原本ファイルは Storage の source-files バケットに残るため、必要ならダッシュボードの Storage から消します。
+- **テストデータを入れる**：全13論点について、全社（S01〜S10）の前期（1Q〜期末）と当期（1Q・2Q）のデータを入れます（2〜3分）
+  - 収集パッケージ：全様式（当期2Qは提出済・入力中・差し戻しも）と試算表の提出
+  - 有給休暇・減価償却：取込 → 明細チェック → 計算 → 確定を、アプリの処理そのもので行う（S01 は手で試すため空けている）
+  - そのほかの論点：収集パッケージの入力から仕訳を簡易計算して確定（期間の金額の論点は当期の累計、残高の論点は前年度末からの増減、洗替は期末の全額）。当期2Qの一部は下書き
+  - のれん・株式報酬・借入手数料は、一部の会社で「適用」にする方針の上書きを入れる
+  - 連結精算表：当期2Qを集計したあと、S03 の有給休暇を訂正（上書き前後を確かめられる）
+  - 前に入れたテストデータは入れ替え、画面で入力したものは残す
+- **テストデータを全て消す**：テストデータ（`is_demo_seed` の付いたもの）を全て消し、方針の上書きを元に戻す。「画面で入力したものも消す」にチェックを入れると、マスタ以外を全て消す
+- コマンドで入れ直すときは `npx vitest run --config scripts/vitest.seed.config.ts`
 
 ## 注意（プロトタイプの前提）
 

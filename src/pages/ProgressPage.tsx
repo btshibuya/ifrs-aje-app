@@ -83,7 +83,7 @@ export default function ProgressPage() {
       </div>
       {tooltip.node}
       <p className="muted small">
-        会社×論点ごとの状況です。<b>太枠</b>の論点（有給休暇引当金・減価償却）はこのプロトタイプで計算まで動きます。セルを押すと作業画面に移ります。
+        会社×論点ごとの状況です。<b>太枠</b>の論点（有給休暇引当金・減価償却）はこのプロトタイプで計算まで動きます。ほかの論点は、収集パッケージの入力から作った仕訳を見られます。セルを押すと作業画面に移ります。
       </p>
       <div className="table-wrap">
         <table className="matrix">
@@ -123,7 +123,8 @@ export default function ProgressPage() {
                     const cell = a === 'applied' ? <StatusBadge status={s} /> : <ApplicabilityBadge value={a} />
                     return (
                       <td key={i.code} className={implemented ? 'implemented' : ''}>
-                        {implemented ? <Link to={`/work/${p.id}/${i.code}`} className="cell-link">{cell}</Link> : cell}
+                        {/* 計算まで実装していない論点も、仕訳（収集パッケージから作ったもの）を見られる */}
+                        <Link to={`/work/${p.id}/${i.code}`} className="cell-link">{cell}</Link>
                       </td>
                     )
                   })}
