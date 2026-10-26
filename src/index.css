@@ -856,3 +856,4 @@ tr.ws-row-on > * { background-image: linear-gradient(var(--primary-soft), var(--
 @media (max-width: 640px) { .pkg-tools .field-inline { max-width: 100%; } .pkg-tools .field-inline select { min-width: 0; max-width: 100%; flex: 1; } }
 .remap-sample { margin-left: 6px; font-weight: 400; }
 .snap-changed { font-size: 12px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 2px 10px; }
+.cons-missing, .cons-alert { margin-bottom: 12px; }

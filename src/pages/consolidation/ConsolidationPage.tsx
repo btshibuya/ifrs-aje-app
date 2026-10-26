@@ -182,13 +182,13 @@ export default function ConsolidationPage() {
         </details>
       )}
       {staleList.length > 0 && (
-        <div className="alert alert-warn">
+        <div className="alert alert-warn cons-alert">
           <b>明細が入れ替わり、再計算を待っている会社×論点が {staleList.length}件 あります。</b>精算表は前の計算の仕訳のままです。再計算すると上書きされます：
           {staleList.map(({ t, i }) => <a key={`${t.company.id}|${i}`} href={`#/work/${t.period.id}/${i}`} style={{ marginLeft: 8 }}>{t.company.code} {issueName(i)}</a>)}
         </div>
       )}
       {d.warnings.length > 0 && (
-        <div className="alert alert-warn">
+        <div className="alert alert-warn cons-alert">
           <b>開始仕訳の注意（{d.warnings.length}件）</b>
           <ul>{d.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
         </div>

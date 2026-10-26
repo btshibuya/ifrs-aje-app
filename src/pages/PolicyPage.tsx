@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApplicabilityBadge, ErrorBox, Loading, PageHeader, SlotToggle } from '../components/ui'
-import { useAsync, useSlot } from '../lib/hooks'
+import { parseSlot, useAsync, useSlot } from '../lib/hooks'
 import { fetchMasters } from '../lib/masters'
 import { must, supabase } from '../lib/supabase'
 
@@ -35,10 +35,8 @@ export default function PolicyPage() {
   const [slot, setSlot] = useSlot()
   const [selected, setSelected] = useState<PolicyRow | null>(null)
   const { data, error, loading } = useAsync(async () => {
-    const m = await fetchMasters()
-    // 対象の時点の期だけを読む（ビュー全体は四半期を含めて1000行を超え、上限で切れるため）
-    const pids = m.companies.map((c) => m.periodFor(c.id, slot)?.id).filter((x): x is string => !!x)
-    const rows = await supabase.from('v_policy_matrix').select('*').in('period_id', pids)
+    // ビューは時点の種類（四半期・期末）で絞って読む（全体は1000行の上限を超えるため）。マスタと同時に問い合わせる
+    const [m, rows] = await Promise.all([fetchMasters(), supabase.from('v_policy_matrix').select('*').eq('period_type', parseSlot(slot).q)])
     return { m, rows: must(rows) as PolicyRow[] }
   }, [slot])
 

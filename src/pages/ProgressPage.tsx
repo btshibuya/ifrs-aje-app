@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Legend, StackedBar, useTooltip, type Segment } from '../components/charts'
 import { ApplicabilityBadge, ErrorBox, Loading, PageHeader, SlotToggle, StatusBadge } from '../components/ui'
-import { useAsync, useSlot } from '../lib/hooks'
+import { parseSlot, useAsync, useSlot } from '../lib/hooks'
 import { ISSUE_CONFIGS, STATUS_LABELS } from '../lib/issues'
 import { fetchMasters, type PeriodRow } from '../lib/masters'
 import { fetchAllMaterialStates, summarize } from '../lib/package'
@@ -22,15 +22,15 @@ export default function ProgressPage() {
   const [slot, setSlot] = useSlot()
   const tooltip = useTooltip()
   const { data, error, loading } = useAsync(async () => {
-    const m = await fetchMasters()
-    const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
-    // 対象の時点の期だけを読む（ビュー全体は四半期を含めて1000行を超え、上限で切れるため）
-    const pids = periods.map((p) => p.id)
-    const [progress, policies, materials] = await Promise.all([
-      supabase.from('v_progress').select('period_id, issue_code, status').in('period_id', pids),
-      supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').in('period_id', pids),
-      fetchAllMaterialStates(m, periods),
+    // ビューは時点の種類（四半期・期末）で絞って読む（全体は1000行の上限を超えるため）。マスタと同時に問い合わせる
+    const q = parseSlot(slot).q
+    const [m, progress, policies] = await Promise.all([
+      fetchMasters(),
+      supabase.from('v_progress').select('period_id, issue_code, status').eq('period_type', q),
+      supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').eq('period_type', q),
     ])
+    const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
+    const materials = await fetchAllMaterialStates(m, periods)
     return { m, progress: must(progress) as ProgressRow[], policies: must(policies) as PolicyRow[], materials }
   }, [slot])
 

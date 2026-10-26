@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DivergingBars, Waterfall, useTooltip, yenText, type WaterfallStep } from '../components/charts'
 import { ErrorBox, Loading, Money, PageHeader, SlotToggle } from '../components/ui'
-import { useAsync, useSlot } from '../lib/hooks'
+import { parseSlot, useAsync, useSlot } from '../lib/hooks'
 import { fetchMasters } from '../lib/masters'
 import { must, supabase } from '../lib/supabase'
 
@@ -22,17 +22,17 @@ export default function ImpactPage() {
   const [picked, setPicked] = useState<string | null>(null)
   const tooltip = useTooltip()
   const { data, error, loading } = useAsync(async () => {
-    const m = await fetchMasters()
-    // 対象の時点の期だけを読む（四半期を含めると行数が上限の1000行を超えるため）
-    const pids = m.companies.map((c) => m.periodFor(c.id, slot)?.id).filter((x): x is string => !!x)
-    const [rows, lines] = await Promise.all([
-      supabase.from('v_impact_summary').select('*').in('period_id', pids),
+    // 時点の種類（四半期・期末）で絞って読む（四半期を含めると行数が上限の1000行を超えるため）。マスタと同時に問い合わせる
+    const q = parseSlot(slot).q
+    const [m, rows, lines] = await Promise.all([
+      fetchMasters(),
+      supabase.from('v_impact_summary').select('*').eq('period_type', q),
       // 影響額の集計（v_impact_summary）と同じく、下書き・確定の計算の仕訳だけを使う
       supabase.from('journal_lines')
-        .select('side, amount, group_account_code, group_accounts!inner(name, statement, pl_class), journal_entries!inner(period_id, issue_code, calculation_runs!inner(status))')
+        .select('side, amount, group_account_code, group_accounts!inner(name, statement, pl_class), journal_entries!inner(period_id, issue_code, calculation_runs!inner(status), periods!inner(period_type))')
         .eq('group_accounts.statement', 'PL')
         .in('journal_entries.calculation_runs.status', ['draft', 'final'])
-        .in('journal_entries.period_id', pids),
+        .eq('journal_entries.periods.period_type', q),
     ])
     return { m, rows: must(rows) as ImpactRow[], lines: must(lines) as unknown as PlLine[] }
   }, [slot])
