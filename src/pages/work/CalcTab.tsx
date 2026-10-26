@@ -1,12 +1,22 @@
 import { useState } from 'react'
+import { useFeedback } from '../../components/feedback'
+import { must, supabase } from '../../lib/supabase'
+import OverwriteImpact from './OverwriteImpact'
 import { InlineBar, Waterfall, useTooltip, type WaterfallStep } from '../../components/charts'
 import { ErrorBox, Loading, Money, formatDateTime } from '../../components/ui'
 import { reproduceCalculation, type CheckResult } from '../../lib/verify'
 import { useAsync } from '../../lib/hooks'
 import {
-  fetchBalances, fetchMissingCarryforward, fetchSteps, planCalculation, saveCalculation,
+  fetchBalances, fetchEntries, fetchMissingCarryforward, fetchSteps, planCalculation, saveCalculation,
   type ItemRow, type Period, type Run, type StepRow,
 } from '../../lib/workflow'
+
+// 連結の基準日は、決算日が違う会社では3か月後までになる（12月決算 → 3月の連結）
+const threeMonthsLater = (d: string) => {
+  const [y, m] = d.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m + 3, 0))
+  return t.toISOString().slice(0, 10)
+}
 
 const MOVEMENT_LABELS: Record<string, string> = { new: '新規', continuing: '継続', disposed: '除却' }
 
@@ -49,6 +59,7 @@ function StepTable({ steps }: { steps: StepRow[] }) {
 export default function CalcTab({ period, issueCode, items, run, stale, locked, onDone }: {
   period: Period; issueCode: string; items: ItemRow[]; run: Run | null; stale: boolean; locked: boolean; onDone: () => void
 }) {
+  const fb = useFeedback()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
@@ -84,7 +95,29 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
     setError(null)
     try {
       const plan = await planCalculation(period, issueCode, items)
+      // 前の計算があるときは、上書きで仕訳（＝連結精算表）がどう変わるかを見せてから保存する
+      if (run) {
+        const [old, accs, snaps] = await Promise.all([
+          fetchEntries(run.id),
+          supabase.from('group_accounts').select('code, name, statement'),
+          supabase.from('consolidation_snapshots').select('id', { count: 'exact', head: true }).gte('as_of', period.end_date).lte('as_of', threeMonthsLater(period.end_date)),
+        ])
+        const names = new Map((must(accs) as { code: string; name: string; statement: string }[]).map((a) => [a.code, a]))
+        const net = new Map<string, { before: number; after: number }>()
+        const bump = (code: string, k: 'before' | 'after', v: number) => { const x = net.get(code) ?? { before: 0, after: 0 }; x[k] += v; net.set(code, x) }
+        for (const e of old) for (const l of e.journal_lines) bump(l.group_account_code, 'before', (l.side === 'debit' ? 1 : -1) * Number(l.amount))
+        for (const e of plan.result.entries) for (const l of e.lines) bump(l.account, 'after', (l.side === 'debit' ? 1 : -1) * l.amount)
+        const order = ['BS', 'PL', 'OCI']
+        const rows = [...net.entries()].map(([code, v]) => ({ code, name: names.get(code)?.name ?? code, statement: names.get(code)?.statement ?? 'BS', ...v }))
+          .sort((a, b) => order.indexOf(a.statement) - order.indexOf(b.statement) || a.code.localeCompare(b.code))
+        const ok = await fb.confirm({
+          title: '前の計算を上書きしますか？', confirmLabel: '上書きして保存する',
+          body: <OverwriteImpact rows={rows} consolidated={(snaps.count ?? 0) > 0} />,
+        })
+        if (ok === null) return
+      }
       await saveCalculation(period, issueCode, items, plan)
+      fb.toast(run ? '計算を上書きしました' : '計算しました')
       onDone()
     } catch (e) {
       setError((e as Error).message)

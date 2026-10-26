@@ -22,13 +22,15 @@ export default function ProgressPage() {
   const [slot, setSlot] = useSlot()
   const tooltip = useTooltip()
   const { data, error, loading } = useAsync(async () => {
-    const [m, progress, policies] = await Promise.all([
-      fetchMasters(),
-      supabase.from('v_progress').select('period_id, issue_code, status'),
-      supabase.from('v_policy_matrix').select('period_id, issue_code, applicability'),
-    ])
+    const m = await fetchMasters()
     const periods = m.companies.map((c) => m.periodFor(c.id, slot)).filter((p): p is PeriodRow => !!p)
-    const materials = await fetchAllMaterialStates(m, periods)
+    // 対象の時点の期だけを読む（ビュー全体は四半期を含めて1000行を超え、上限で切れるため）
+    const pids = periods.map((p) => p.id)
+    const [progress, policies, materials] = await Promise.all([
+      supabase.from('v_progress').select('period_id, issue_code, status').in('period_id', pids),
+      supabase.from('v_policy_matrix').select('period_id, issue_code, applicability').in('period_id', pids),
+      fetchAllMaterialStates(m, periods),
+    ])
     return { m, progress: must(progress) as ProgressRow[], policies: must(policies) as PolicyRow[], materials }
   }, [slot])
 
@@ -66,7 +68,7 @@ export default function ProgressPage() {
   return (
     <>
       <PageHeader title="進捗一覧">
-        <SlotToggle slot={slot} onChange={setSlot} />
+        <SlotToggle slot={slot} onChange={setSlot} years={m.yearLabels} />
       </PageHeader>
       <div className="progress-hero">
         <div>

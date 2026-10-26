@@ -96,6 +96,19 @@ export function parseNumber(raw: string): number | null | 'error' {
   return Number.isFinite(v) ? v : 'error'
 }
 
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+// 日付：2024/4/1、2024-04-01、2024年4月1日、2024/04（年月だけなら1日）を受け付ける
+export function parseDateInput(raw: string, monthOnly = false): string | null | 'error' {
+  const s = raw.trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+  if (s === '') return null
+  const m = s.match(/^(\d{4})[/\-.年](\d{1,2})(?:[/\-.月](\d{1,2})日?)?月?$/)
+  if (!m) return 'error'
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), m[3] ? Number(m[3]) : 1]
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return 'error'
+  return `${y}-${pad2(mo)}-${pad2(monthOnly ? 1 : d)}`
+}
+
 export function formatNumber(v: unknown, type: PkgField['type']): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) return v === null || v === undefined ? '' : String(v)
   const digits = type === 'percent' || type === 'years' ? 2 : type === 'days' ? 1 : 0

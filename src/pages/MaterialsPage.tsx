@@ -47,7 +47,7 @@ export default function MaterialsPage() {
           <option value="">全社（提出状況の一覧）</option>
           {m.companies.map((c) => <option key={c.id} value={c.code}>{c.code} {c.name}</option>)}
         </select>
-        <SlotToggle slot={slot} onChange={setSlot} />
+        <SlotToggle slot={slot} onChange={setSlot} years={m.yearLabels} />
       </PageHeader>
       {tooltip.node}
       {company && data.states.get(company.id)

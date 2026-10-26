@@ -38,7 +38,7 @@ export default function MastersPage() {
   const companyOptions = (data?.companies ?? []).map((c) => ({ value: String(c.id), label: `${c.code} ${c.name}` }))
   const companyLabel = (id: unknown) => (id ? companyOptions.find((o) => o.value === id)?.label ?? String(id) : 'グループ共通')
   const issueOptions = (data?.issues ?? []).map((i) => ({ value: String(i.code), label: `${i.no}. ${i.name}` }))
-  const periodOptions = (data?.periods ?? []).map((p) => ({ value: String(p.id), label: `${companyLabel(p.company_id).split(' ')[0]} ${p.label}` }))
+  const periodOptions = (data?.periods ?? []).filter((p) => p.period_type === 'FY').map((p) => ({ value: String(p.id), label: `${companyLabel(p.company_id).split(' ')[0]} ${p.label}` }))
 
   return (
     <>
@@ -80,10 +80,14 @@ export default function MastersPage() {
         )}
         {data && tab === 'periods' && (
           <MasterTable table="periods" title="決算期" pk="id" rows={data.periods} onChanged={reload}
-            description="会社ごとの決算期です。「前期」を指定すると、翌期の計算が前期末の残高を引き継ぎます。"
+            description="会社ごとの決算期と四半期です。四半期の開始日は年度の開始日（累計期間）で、「前期」には前年度の期末を指定します。前期の確定した残高から、四半期末・期末までの累計で計算します。"
+            defaults={() => ({ period_type: 'FY' })}
             columns={[
               { key: 'company_id', label: '会社', type: 'select', required: true, options: companyOptions, readOnlyOnEdit: true, width: 200 },
-              { key: 'label', label: '名称', type: 'text', required: true, placeholder: '例：2028年3月期' },
+              { key: 'label', label: '名称', type: 'text', required: true, placeholder: '例：2028年3月期 第1四半期' },
+              { key: 'period_type', label: '種類', type: 'select', required: true, options: [
+                { value: 'Q1', label: '第1四半期' }, { value: 'Q2', label: '第2四半期' }, { value: 'Q3', label: '第3四半期' }, { value: 'FY', label: '期末（本決算）' },
+              ] },
               { key: 'start_date', label: '開始日', type: 'date', required: true },
               { key: 'end_date', label: '終了日', type: 'date', required: true },
               { key: 'prior_period_id', label: '前期', type: 'select', options: periodOptions, width: 180 },

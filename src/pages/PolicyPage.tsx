@@ -35,9 +35,12 @@ export default function PolicyPage() {
   const [slot, setSlot] = useSlot()
   const [selected, setSelected] = useState<PolicyRow | null>(null)
   const { data, error, loading } = useAsync(async () => {
-    const [m, rows] = await Promise.all([fetchMasters(), supabase.from('v_policy_matrix').select('*')])
+    const m = await fetchMasters()
+    // 対象の時点の期だけを読む（ビュー全体は四半期を含めて1000行を超え、上限で切れるため）
+    const pids = m.companies.map((c) => m.periodFor(c.id, slot)?.id).filter((x): x is string => !!x)
+    const rows = await supabase.from('v_policy_matrix').select('*').in('period_id', pids)
     return { m, rows: must(rows) as PolicyRow[] }
-  }, [])
+  }, [slot])
 
   if (loading && !data) return <Loading />
   if (error) return <ErrorBox message={error} />
@@ -48,7 +51,7 @@ export default function PolicyPage() {
   return (
     <>
       <PageHeader title="会社別方針一覧">
-        <SlotToggle slot={slot} onChange={setSlot} />
+        <SlotToggle slot={slot} onChange={setSlot} years={m.yearLabels} />
       </PageHeader>
       <p className="muted small">
         グループ共通の方針に、会社ごとの上書きを重ねた結果です。<span className="override-mark">●</span> は会社ごとの上書きがある論点です。セルを押すと前提値と理由を表示します。

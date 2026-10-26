@@ -27,17 +27,32 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
   return { data, error, loading: loading || state.key !== key, reload }
 }
 
-// 一覧画面で「前期／当期」を切り替える。選択はブラウザに覚えておく
-export type Slot = 'prior' | 'current'
+// 一覧画面で、対象の時点（前期・当期 × 第1〜第3四半期・期末）を切り替える。選択はブラウザに覚えておく
+export type Quarter = 'Q1' | 'Q2' | 'Q3' | 'FY'
+export type Slot = `${'prior' | 'current'}:${Quarter}`
+export const QUARTERS: Quarter[] = ['Q1', 'Q2', 'Q3', 'FY']
+export const QUARTER_LABELS: Record<Quarter, string> = { Q1: '第1四半期', Q2: '第2四半期', Q3: '第3四半期', FY: '期末（本決算）' }
+export const QUARTER_SHORT: Record<Quarter, string> = { Q1: '1Q', Q2: '2Q', Q3: '3Q', FY: '期末' }
+
+export const parseSlot = (s: Slot) => {
+  const [fy, q] = s.split(':') as ['prior' | 'current', Quarter]
+  return { fy, q }
+}
+
+function readSlot(): Slot {
+  try {
+    const v = localStorage.getItem('slot') ?? ''
+    // 以前の保存形式（prior / current）は、期末として読む
+    if (v === 'prior' || v === 'current') return `${v}:FY`
+    if (/^(prior|current):(Q1|Q2|Q3|FY)$/.test(v)) return v as Slot
+  } catch {
+    // 読めなくても既定で動く
+  }
+  return 'current:FY'
+}
 
 export function useSlot(): [Slot, (s: Slot) => void] {
-  const [slot, setSlot] = useState<Slot>(() => {
-    try {
-      return localStorage.getItem('slot') === 'prior' ? 'prior' : 'current'
-    } catch {
-      return 'current'
-    }
-  })
+  const [slot, setSlot] = useState<Slot>(readSlot)
   const update = (s: Slot) => {
     setSlot(s)
     try {

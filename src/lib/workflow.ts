@@ -25,7 +25,22 @@ export interface Period {
   start_date: string
   end_date: string
   prior_period_id: string | null
+  period_type: 'Q1' | 'Q2' | 'Q3' | 'FY'
   companies: Company
+}
+
+export interface TimelinePoint { id: string; label: string; start_date: string; end_date: string; period_type: string; status: string }
+
+// 会社のすべての時点（古い順）と、指定した論点の状況
+export async function fetchTimeline(companyId: string, issueCode: string): Promise<TimelinePoint[]> {
+  const ps = must(
+    await supabase.from('periods').select('id, label, start_date, end_date, period_type').eq('company_id', companyId).order('end_date'),
+  ) as Omit<TimelinePoint, 'status'>[]
+  const ws = must(
+    await supabase.from('work_status').select('period_id, status').eq('issue_code', issueCode).in('period_id', ps.map((p) => p.id)),
+  ) as { period_id: string; status: string }[]
+  const st = new Map(ws.map((w) => [w.period_id, w.status]))
+  return ps.map((p) => ({ ...p, status: st.get(p.id) ?? 'not_started' }))
 }
 
 export interface Policy {
@@ -118,32 +133,79 @@ export interface ImportPreview {
   missingColumns: string[]
   mappingScope: string
   duplicateKeys: string[]
+  // 列名が合わないときに、画面で列を選び直せるようにする
+  table: unknown[][]
+  headerRow: number
+  headers: string[]
+  mapping: Record<string, string>
+}
+
+const findDuplicates = (rows: { itemKey: string }[]) => {
+  const seen = new Set<string>()
+  const dup = new Set<string>()
+  for (const r of rows) {
+    if (seen.has(r.itemKey)) dup.add(r.itemKey)
+    seen.add(r.itemKey)
+  }
+  return [...dup]
 }
 
 export async function previewImport(period: Period, cfg: IssueConfig, file: File): Promise<ImportPreview> {
   const mapping = await fetchColumnMapping(period, cfg.sourceKind)
-  const { readRows, mapRows } = await loadParser()
+  const { readRows } = await loadParser()
   const table = await readRows(file)
-  const { rows, missingColumns } = mapRows(table, mapping.header_row, mapping.mapping, cfg.fields, cfg.keyField)
-  const seen = new Set<string>()
-  const duplicateKeys = new Set<string>()
-  for (const r of rows) {
-    if (seen.has(r.itemKey)) duplicateKeys.add(r.itemKey)
-    seen.add(r.itemKey)
-  }
-  return { file, buf: await file.arrayBuffer(), rows, missingColumns, mappingScope: mapping.scope, duplicateKeys: [...duplicateKeys] }
+  return remapPreview(cfg, { file, buf: await file.arrayBuffer(), table, mappingScope: mapping.scope }, mapping.header_row, mapping.mapping)
+}
+
+// 見出しの行・列の対応を変えて読み直す（ファイルは読み直さない）
+export async function remapPreview(
+  cfg: IssueConfig, base: { file: File; buf: ArrayBuffer; table: unknown[][]; mappingScope: string }, headerRow: number, mapping: Record<string, string>,
+): Promise<ImportPreview> {
+  const { mapRows } = await loadParser()
+  const table = base.table as Parameters<typeof mapRows>[0]
+  const { rows, missingColumns } = mapRows(table, headerRow, mapping, cfg.fields, cfg.keyField)
+  const headers = (table[headerRow - 1] ?? []).map((h) => String(h ?? '').trim()).filter((h) => h !== '')
+  return { ...base, rows, missingColumns, duplicateKeys: findDuplicates(rows), headerRow, headers, mapping }
+}
+
+// 画面で選び直した列の対応を、この会社の列マッピングとして保存する（次回から自動で読める）
+export async function saveCompanyMapping(period: Period, cfg: IssueConfig, headerRow: number, mapping: Record<string, string>) {
+  const software = period.companies.accounting_software ?? ''
+  const existing = must(
+    await supabase.from('column_mappings').select('id').eq('company_id', period.company_id).eq('source_kind', cfg.sourceKind).eq('software', software).maybeSingle(),
+  ) as { id: string } | null
+  const row = { company_id: period.company_id, source_kind: cfg.sourceKind, software, header_row: headerRow, mapping, is_hidden: false, updated_at: new Date().toISOString() }
+  if (existing) must(await supabase.from('column_mappings').update(row).eq('id', existing.id))
+  else must(await supabase.from('column_mappings').insert(row))
+}
+
+export interface RowsToSave {
+  fileName: string
+  buf: ArrayBuffer
+  fileType: 'excel' | 'csv' | 'manual'
+  contentType: string
+  rows: { rowNo: number; itemKey: string; data: Record<string, unknown> }[]
 }
 
 // 取込を確定する：原本を保存し、明細を入れ替える（確定前の計算は削除する）
 export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPreview) {
-  const hash = await sha256(p.buf)
   const ext = p.file.name.split('.').pop()?.toLowerCase() ?? 'bin'
+  return commitRows(period, cfg, {
+    fileName: p.file.name, buf: p.buf, fileType: ext === 'xlsx' ? 'excel' : 'csv', contentType: p.file.type || 'application/octet-stream',
+    rows: p.rows.filter((r) => r.errors.length === 0 && r.itemKey !== ''),
+  })
+}
+
+// ファイル取込・手入力の共通：元資料（手入力はCSVにして）を保存し、明細を入れ替える
+export async function commitRows(period: Period, cfg: IssueConfig, p: RowsToSave) {
+  const hash = await sha256(p.buf)
+  const ext = p.fileName.split('.').pop()?.toLowerCase() ?? 'bin'
   const path = `${period.id}/${cfg.code}/${Date.now()}_${hash.slice(0, 12)}.${ext}`
-  must(await supabase.storage.from('source-files').upload(path, p.buf, { contentType: p.file.type || 'application/octet-stream' }))
+  must(await supabase.storage.from('source-files').upload(path, p.buf, { contentType: p.contentType }))
   const sf = must(
     await supabase.from('source_files').insert({
-      period_id: period.id, issue_code: cfg.code, source_kind: cfg.sourceKind, file_name: p.file.name,
-      file_type: ext === 'xlsx' ? 'excel' : 'csv', storage_path: path, sha256: hash,
+      period_id: period.id, issue_code: cfg.code, source_kind: cfg.sourceKind, file_name: p.fileName,
+      file_type: p.fileType, storage_path: path, sha256: hash,
     }).select('id').single(),
   ) as { id: string }
 
@@ -157,11 +219,10 @@ export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPr
     must(await supabase.from('calculation_runs').delete().in('id', ids))
   }
   must(await supabase.from('detail_items').delete().eq('period_id', period.id).eq('issue_code', cfg.code))
-  const valid = p.rows.filter((r) => r.errors.length === 0 && r.itemKey !== '')
-  if (valid.length > 0) {
+  if (p.rows.length > 0) {
     must(
       await supabase.from('detail_items').insert(
-        valid.map((r) => ({
+        p.rows.map((r) => ({
           period_id: period.id, issue_code: cfg.code, item_key: r.itemKey, source_file_id: sf.id,
           source_row_no: r.rowNo, data: r.data,
         })),
@@ -169,7 +230,7 @@ export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPr
     )
   }
   await setStatus(period.id, cfg.code, 'imported')
-  return valid.length
+  return p.rows.length
 }
 
 export async function fetchItems(periodId: string, issueCode: string): Promise<ItemRow[]> {
@@ -182,9 +243,9 @@ export async function fetchItems(periodId: string, issueCode: string): Promise<I
 
 export async function fetchSourceFiles(periodId: string, issueCode: string) {
   return must(
-    await supabase.from('source_files').select('id, file_name, sha256, uploaded_at, storage_path')
+    await supabase.from('source_files').select('id, file_name, file_type, sha256, uploaded_at, storage_path')
       .eq('period_id', periodId).eq('issue_code', issueCode).order('uploaded_at', { ascending: false }),
-  ) as { id: string; file_name: string; sha256: string; uploaded_at: string; storage_path: string }[]
+  ) as { id: string; file_name: string; file_type: string; sha256: string; uploaded_at: string; storage_path: string }[]
 }
 
 export async function downloadSourceFile(storagePath: string) {

@@ -4,11 +4,12 @@ import { ApplicabilityBadge, ErrorBox, Loading, StatusBadge, Tabs } from '../../
 import { useAsync } from '../../lib/hooks'
 import { ISSUE_CONFIGS, STATUS_LABELS } from '../../lib/issues'
 import { must, supabase } from '../../lib/supabase'
-import { fetchActiveRun, fetchItems, fetchPeriod, fetchPolicy, fetchWorkStatus, itemsHash } from '../../lib/workflow'
+import { fetchActiveRun, fetchTimeline, fetchItems, fetchPeriod, fetchPolicy, fetchWorkStatus, itemsHash } from '../../lib/workflow'
 import CalcTab from './CalcTab'
 import ImportTab from './ImportTab'
 import ItemsTab from './ItemsTab'
 import JournalTab from './JournalTab'
+import PeriodTimeline from './PeriodTimeline'
 
 type TabKey = 'import' | 'items' | 'calc' | 'journal'
 const STEPS = ['imported', 'checked', 'calculated', 'locked']
@@ -20,20 +21,17 @@ export default function WorkPage() {
 
   const { data, error, loading, reload } = useAsync(async () => {
     // 読み込みは並べて行う（前期は今期の情報が必要なので、そのあとで明細のハッシュ計算と並べる）
-    const [period, policy, ws, items, run, issue, nextRows] = await Promise.all([
+    const [period, policy, ws, items, run, issue] = await Promise.all([
       fetchPeriod(periodId), fetchPolicy(periodId, issueCode), fetchWorkStatus(periodId, issueCode),
       fetchItems(periodId, issueCode), fetchActiveRun(periodId, issueCode),
       supabase.from('issues').select('name, no, standard_ref').eq('code', issueCode).single(),
-      supabase.from('periods').select('id, label').eq('prior_period_id', periodId),
     ])
-    const [next] = must(nextRows) as { id: string; label: string }[]
-    const [prior, stale] = await Promise.all([
-      period.prior_period_id
-        ? supabase.from('periods').select('id, label').eq('id', period.prior_period_id).single().then((r) => must(r) as { id: string; label: string })
-        : Promise.resolve(null),
+    // 同じ会社のすべての時点（四半期・期末）と、この論点の状況（時点の切り替えに出す）
+    const [timeline, stale] = await Promise.all([
+      fetchTimeline(period.company_id, issueCode),
       run ? itemsHash(items).then((h) => h !== run.input_hash) : Promise.resolve(false),
     ])
-    return { period, policy, ws, items, run, stale, issue: must(issue) as { name: string; no: number; standard_ref: string }, next, prior }
+    return { period, policy, ws, items, run, stale, issue: must(issue) as { name: string; no: number; standard_ref: string }, timeline }
   }, [periodId, issueCode])
 
 
@@ -61,10 +59,14 @@ export default function WorkPage() {
         </h1>
         <div className="page-header-tools">
           {data.run && <Link className="btn" to={`/report/${period.id}/${issueCode}`}>検証レポート</Link>}
-          {data.prior && <Link className="btn" to={`/work/${data.prior.id}/${issueCode}`}>← 前期（{data.prior.label}）</Link>}
-          {data.next && <Link className="btn" to={`/work/${data.next.id}/${issueCode}`}>翌期（{data.next.label}）→</Link>}
         </div>
       </div>
+      <PeriodTimeline timeline={data.timeline} currentId={period.id} issueCode={issueCode} />
+      {period.period_type !== 'FY' && (
+        <p className="small muted" style={{ margin: '0 0 8px' }}>
+          四半期は、期首（{period.start_date.replaceAll('-', '/')}）から四半期末（{period.end_date.replaceAll('-', '/')}）までの累計で計算します。累積の論点は前年度末の確定した残高から、洗替の論点は四半期末の全額です。
+        </p>
+      )}
 
       <div className="work-meta">
         <div>方針：<ApplicabilityBadge value={policy.applicability} /> {policy.is_company_override && <span className="small muted">（会社ごとの上書き）</span>}</div>
@@ -90,7 +92,7 @@ export default function WorkPage() {
         ]}
       />
       <div className="tab-body">
-        {activeTab === 'import' && <ImportTab period={period} cfg={cfg} locked={locked} onDone={() => { reload(); setTab('items') }} />}
+        {activeTab === 'import' && <ImportTab period={period} cfg={cfg} items={items} locked={locked} onDone={() => { reload(); setTab('items') }} />}
         {activeTab === 'items' && <ItemsTab periodId={period.id} cfg={cfg} items={items} locked={locked} onDone={reload} />}
         {activeTab === 'calc' && <CalcTab period={period} issueCode={issueCode} items={items} run={run} stale={stale} locked={locked} onDone={reload} />}
         {activeTab === 'journal' && <JournalTab period={period} issueCode={issueCode} issueName={issue.name} run={run} locked={locked} stale={stale} onDone={reload} />}

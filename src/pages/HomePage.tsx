@@ -94,7 +94,7 @@ export default function HomePage() {
   return (
     <div className="stack">
       <PageHeader title="ホーム">
-        <SlotToggle slot={slot} onChange={setSlot} />
+        <SlotToggle slot={slot} onChange={setSlot} years={m.yearLabels} />
       </PageHeader>
 
       <section aria-label="作業の流れ">

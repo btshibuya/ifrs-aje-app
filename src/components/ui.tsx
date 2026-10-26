@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Slot } from '../lib/hooks'
+import { QUARTERS, QUARTER_LABELS, QUARTER_SHORT, parseSlot, type Slot } from '../lib/hooks'
 import { APPLICABILITY_LABELS, STATUS_LABELS } from '../lib/issues'
 
 // 読み込み中：画面の骨組み（灰色の帯）を出し、表示が出たときのずれを小さくする。文字は読み上げ用に残す
@@ -49,11 +49,24 @@ export function ApplicabilityBadge({ value }: { value: string | null }) {
   return <span className={`badge app-${value}`}>{APPLICABILITY_LABELS[value] ?? value}</span>
 }
 
-export function SlotToggle({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
+// 対象の時点：前期・当期のそれぞれに、第1〜第3四半期と期末を並べる（時系列の順）
+export function SlotToggle({ slot, onChange, years }: { slot: Slot; onChange: (s: Slot) => void; years?: { prior: string; current: string } }) {
+  const { fy, q } = parseSlot(slot)
   return (
-    <div className="segmented" role="group" aria-label="対象期">
-      <button className={slot === 'prior' ? 'on' : ''} onClick={() => onChange('prior')}>前期（2026年3月期等）</button>
-      <button className={slot === 'current' ? 'on' : ''} onClick={() => onChange('current')}>当期（2027年3月期等）</button>
+    <div className="period-picker" role="group" aria-label="対象の時点">
+      {(['prior', 'current'] as const).map((y) => (
+        <div key={y} className={`pp-year${fy === y ? ' on' : ''}`}>
+          <span className="pp-year-label">{y === 'prior' ? '前期' : '当期'}<small>{years?.[y] ?? ''}{years ? '等' : ''}</small></span>
+          <div className="segmented pp-quarters">
+            {QUARTERS.map((x) => (
+              <button key={x} className={fy === y && q === x ? 'on' : ''} aria-pressed={fy === y && q === x}
+                title={`${years?.[y] ?? (y === 'prior' ? '前期' : '当期')} ${QUARTER_LABELS[x]}`} onClick={() => onChange(`${y}:${x}`)}>
+                {QUARTER_SHORT[x]}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

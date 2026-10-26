@@ -7,6 +7,7 @@ import ThemePicker from './components/ThemePicker'
 // 実測で初回表示が約2割遅くなった。Excel・CSVの読み取りだけは、取り込むときに読む）
 import ChangeLogPage from './pages/ChangeLogPage'
 import ChecksPage from './pages/ChecksPage'
+import ConsolidationPage from './pages/consolidation/ConsolidationPage'
 import HomePage from './pages/HomePage'
 import ImpactPage from './pages/ImpactPage'
 import MastersPage from './pages/MastersPage'
@@ -22,6 +23,7 @@ const NAV = [
   { to: '/progress', label: '進捗一覧' },
   { to: '/materials', label: '資料一覧' },
   { to: '/package', label: '収集パッケージ' },
+  { to: '/consolidation', label: '連結精算表' },
   { to: '/policies', label: '会社別方針一覧' },
   { to: '/impact', label: '論点別影響額' },
   { to: '/checks', label: 'チェック' },
@@ -31,7 +33,7 @@ const NAV = [
 
 // ブラウザのタブ名に、いまの画面名を出す
 const TITLES: [RegExp, string][] = [
-  [/^\/$/, 'ホーム'], [/^\/progress/, '進捗一覧'], [/^\/materials/, '資料一覧'], [/^\/package/, '収集パッケージ'],
+  [/^\/$/, 'ホーム'], [/^\/progress/, '進捗一覧'], [/^\/materials/, '資料一覧'], [/^\/package/, '収集パッケージ'], [/^\/consolidation/, '連結精算表'],
   [/^\/policies/, '会社別方針一覧'], [/^\/work/, '作業画面'], [/^\/report/, '検証レポート'], [/^\/impact/, '論点別影響額'], [/^\/checks/, 'チェック'],
   [/^\/logs/, '変更履歴'], [/^\/masters/, 'マスタ'],
 ]
@@ -80,6 +82,7 @@ export default function App() {
             <Route path="/materials/:companyCode" element={<MaterialsPage />} />
             <Route path="/package" element={<PackagePage />} />
             <Route path="/package/:companyCode/:asOf?/:formCode?" element={<PackagePage />} />
+            <Route path="/consolidation" element={<ConsolidationPage />} />
             <Route path="/policies" element={<PolicyPage />} />
             <Route path="/work/:periodId/:issueCode" element={<WorkRoute />} />
             <Route path="/report/:periodId/:issueCode" element={<ReportRoute />} />

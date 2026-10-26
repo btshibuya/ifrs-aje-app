@@ -48,9 +48,10 @@ export default function PackagePage() {
   const masters = useAsync(fetchMasters, [])
   const m = masters.data
   const company = m?.companies.find((c) => c.code === companyCode)
-  const periods = m && company ? m.periods.filter((p) => p.company_id === company.id) : []
-  // 基準日：指定がなければ最新の期末
-  const asOfs = periods.flatMap((p) => quarterEnds(p.start_date, p.end_date).map((d) => ({ d, p })))
+  const own = m && company ? m.periods.filter((p) => p.company_id === company.id) : []
+  const periods = own.filter((p) => p.period_type === 'FY')
+  // 基準日：指定がなければ最新の期末。四半期末は、その四半期の期（累計期間）を使う
+  const asOfs = periods.flatMap((p) => quarterEnds(p.start_date, p.end_date).map((d) => ({ d, p: own.find((x) => x.end_date === d) ?? p })))
   const current = asOfs.find((x) => x.d === asOf) ?? asOfs[asOfs.length - 1]
   const period: PeriodRow | undefined = current?.p
   const dates: CompareDates | null = current ? compareDates(current.d, current.p) : null
@@ -111,7 +112,7 @@ export default function PackagePage() {
         <p className="muted">入力する会社を選んでください。担当者ごとにログインする運用では、ここが自社だけの画面になります。</p>
         <div className="company-grid">
           {m.companies.map((c) => {
-            const last = m.periods.filter((p) => p.company_id === c.id).at(-1)
+            const last = m.periods.filter((p) => p.company_id === c.id && p.period_type === 'FY').at(-1)
             return (
               <Link key={c.id} className="card company-card" to={`/package/${c.code}/${last?.end_date ?? ''}`}>
                 <b>{c.code} {c.name}</b>
@@ -242,7 +243,7 @@ export default function PackagePage() {
             <span>基準日</span>
             <select value={current.d} onChange={(e) => navigate(`/package/${company.code}/${e.target.value}${form ? `/${form.code}` : ''}`)}>
               {[...asOfs].reverse().map((x) => (
-                <option key={x.d} value={x.d}>{formatAsOf(x.d)}{x.d === x.p.end_date ? `（${x.p.label} 期末）` : '（四半期末）'}</option>
+                <option key={x.d} value={x.d}>{formatAsOf(x.d)}{x.p.period_type === 'FY' ? `（${x.p.label} 期末）` : `（${x.p.label.replace(/^.*\s/, '')}末）`}</option>
               ))}
             </select>
           </label>

@@ -9,7 +9,7 @@ interface ConfirmOptions {
   confirmLabel: string
   danger?: boolean
   // 理由などの入力を求めるとき（空では確定できない）
-  input?: { label: string; placeholder?: string }
+  input?: { label: string; placeholder?: string; defaultValue?: string; rows?: number }
 }
 
 interface Toast { id: number; message: string; tone: 'ok' | 'info' | 'error' }
@@ -55,7 +55,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
 }
 
 function ConfirmDialog({ title, body, confirmLabel, danger, input, onDone }: ConfirmOptions & { onDone: (v: string | null) => void }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(input?.defaultValue ?? '')
   const [touched, setTouched] = useState(false)
   const first = useRef<HTMLTextAreaElement | HTMLButtonElement | null>(null)
   const opener = useRef<Element | null>(document.activeElement)
@@ -85,7 +85,7 @@ function ConfirmDialog({ title, body, confirmLabel, danger, input, onDone }: Con
         {input && (
           <label className="modal-input">
             <span className="small"><b>{input.label}</b><span className="req">必須</span></span>
-            <textarea ref={(el) => { first.current = el }} rows={3} value={text} placeholder={input.placeholder} onChange={(e) => setText(e.target.value)} />
+            <textarea ref={(el) => { first.current = el }} rows={input.rows ?? 3} value={text} placeholder={input.placeholder} onChange={(e) => setText(e.target.value)} />
             {touched && invalid && <span className="small text-error">入力してください</span>}
           </label>
         )}

@@ -22,17 +22,20 @@ export default function ImpactPage() {
   const [picked, setPicked] = useState<string | null>(null)
   const tooltip = useTooltip()
   const { data, error, loading } = useAsync(async () => {
-    const [m, rows, lines] = await Promise.all([
-      fetchMasters(),
-      supabase.from('v_impact_summary').select('*'),
+    const m = await fetchMasters()
+    // 対象の時点の期だけを読む（四半期を含めると行数が上限の1000行を超えるため）
+    const pids = m.companies.map((c) => m.periodFor(c.id, slot)?.id).filter((x): x is string => !!x)
+    const [rows, lines] = await Promise.all([
+      supabase.from('v_impact_summary').select('*').in('period_id', pids),
       // 影響額の集計（v_impact_summary）と同じく、下書き・確定の計算の仕訳だけを使う
       supabase.from('journal_lines')
         .select('side, amount, group_account_code, group_accounts!inner(name, statement, pl_class), journal_entries!inner(period_id, issue_code, calculation_runs!inner(status))')
         .eq('group_accounts.statement', 'PL')
-        .in('journal_entries.calculation_runs.status', ['draft', 'final']),
+        .in('journal_entries.calculation_runs.status', ['draft', 'final'])
+        .in('journal_entries.period_id', pids),
     ])
     return { m, rows: must(rows) as ImpactRow[], lines: must(lines) as unknown as PlLine[] }
-  }, [])
+  }, [slot])
 
   if (loading && !data) return <Loading />
   if (error) return <ErrorBox message={error} />
@@ -81,11 +84,11 @@ export default function ImpactPage() {
   return (
     <>
       <PageHeader title="論点別影響額一覧">
-        <SlotToggle slot={slot} onChange={setSlot} />
+        <SlotToggle slot={slot} onChange={setSlot} years={m.yearLabels} />
       </PageHeader>
       <p className="muted small">
         計算済み・確定済みの仕訳を集計した、当期純利益への影響額です（プラス＝利益が増える）。税効果（法人税等調整額）を含みます。
-        累積の論点は当期の変動分、洗替の論点は期末の全額で、BTrexの開始仕訳による戻入れ・引継ぎは含みません。
+        累積の論点は当期の変動分、洗替の論点は期末の全額で、開始仕訳による戻入れ・引継ぎは含みません（開始仕訳・開始実現仕訳を含めた金額は<Link to="/consolidation">連結精算表</Link>で見られます）。
       </p>
       {issuesWithData.length === 0 ? (
         <div className="alert alert-info">まだ計算した論点がありません。進捗一覧から作業画面を開いて計算してください。</div>

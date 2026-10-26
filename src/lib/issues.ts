@@ -9,8 +9,25 @@ export interface FieldDef {
   required: boolean
 }
 
+// 手入力（明細を1件ずつ／合計で）。会計ソフトから出せない・ファイルがないときの代わりの入り口
+export interface ManualConfig {
+  unitLabel: string // 明細1件の呼び名（従業員・資産）
+  detailTips: string[]
+  aggregate: {
+    title: string
+    lead: string
+    countLabel: string // 人数・件数
+    labels: Partial<Record<string, string>> // 合計で入力するときの項目名
+    placeholders: Partial<Record<string, string>>
+    autoKey?: 'asset_group' // 番号を自動で付ける（資産の種類＋取得年月）
+    helper?: 'weighted_wage' // 残日数×日額給与の合計から、加重平均の日額給与を出す
+    tips: string[]
+  }
+}
+
 export interface IssueConfig {
   code: string
+  manual: ManualConfig
   sourceKind: string
   sourceLabel: string
   keyField: string
@@ -21,6 +38,23 @@ export interface IssueConfig {
 export const ISSUE_CONFIGS: Record<string, IssueConfig> = {
   PAID_LEAVE: {
     code: 'PAID_LEAVE',
+    manual: {
+      unitLabel: '従業員',
+      detailTips: ['1行に1人です。勤怠システムの画面や紙の一覧から、社員番号・残日数・日額給与を入れます。', 'Excel の表をコピーして、最初の欄に貼り付けると、まとめて入ります。'],
+      aggregate: {
+        title: '区分ごとの合計で入力する',
+        lead: '人数が多い、または1人ずつの一覧が出せないときは、管理職・一般職・パートなどの区分ごとに、残日数の合計と日額給与を入れます。',
+        countLabel: '人数',
+        labels: { employee_no: '区分', name: '区分の説明（任意）', unused_days: '有給残日数の合計', daily_wage: '日額給与（残日数で加重平均）' },
+        placeholders: { employee_no: '例：管理職', name: '例：課長以上', unused_days: '例：412.5', daily_wage: '例：28,400' },
+        helper: 'weighted_wage',
+        tips: [
+          '日額給与は「残日数×日額給与の合計 ÷ 残日数の合計」（残日数で加重平均）にすると、1人ずつ計算したときと同じ金額になります。',
+          'Excel では =SUMPRODUCT(残日数の列, 日額給与の列) / SUM(残日数の列) で求められます。右の「残日数×日額給与の合計」に入れると、自動で計算します。',
+          '単純平均（人数で割る）を使うと、残日数の多い人の給与が反映されず、誤差が出ます。',
+        ],
+      },
+    },
     sourceKind: 'paid_leave',
     sourceLabel: '有給休暇の残日数一覧',
     keyField: 'employee_no',
@@ -38,6 +72,26 @@ export const ISSUE_CONFIGS: Record<string, IssueConfig> = {
   },
   DEPRECIATION: {
     code: 'DEPRECIATION',
+    manual: {
+      unitLabel: '資産',
+      detailTips: ['1行に1件の資産です。固定資産台帳の画面や紙の台帳から入れます。', 'Excel の表をコピーして、最初の欄に貼り付けると、まとめて入ります。'],
+      aggregate: {
+        title: '資産の種類×取得年月ごとの合計で入力する',
+        lead: '資産が多いときは、資産の種類と取得年月が同じ資産をまとめて、金額の合計を入れます。番号は自動で付けます。',
+        countLabel: '件数',
+        labels: {
+          asset_no: '番号（自動）', name: 'まとめの名前（任意）', acquired_on: '取得年月', cost: '取得価額の合計',
+          jgaap_opening_bv: '期首帳簿価額の合計', jgaap_depreciation: '当期償却額の合計', jgaap_closing_bv: '期末帳簿価額の合計', disposed_on: '除却年月日',
+        },
+        placeholders: { asset_no: '自動', name: '例：PC 2024年4月取得分', asset_type: '例：器具備品', acquired_on: '例：2024/04', cost: '例：3,600,000' },
+        autoKey: 'asset_group',
+        tips: [
+          '資産の種類と取得年月が同じ資産をまとめると、定額法・月割りのため、1件ずつ入れたときと同じ結果になります。',
+          '取得年月が違う資産をまとめると、償却する月数がずれて誤差が出ます。',
+          '当期に除却・売却した資産は、まとめずに1件ずつ入れてください（除却損の調整を正しく出すため）。',
+        ],
+      },
+    },
     sourceKind: 'fixed_assets',
     sourceLabel: '固定資産台帳',
     keyField: 'asset_no',

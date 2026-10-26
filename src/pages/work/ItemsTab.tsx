@@ -8,6 +8,10 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const checkedCount = items.filter((i) => i.review_status === 'checked').length
+  // 合計で入力した明細は、項目名を「〜の合計」にし、人数・件数の列を足す
+  const agg = items.some((i) => i.data.input_mode === 'aggregate')
+  const label = (key: string, base: string) => (agg ? cfg.manual.aggregate.labels[key] ?? base : base)
+  const manual = items.some((i) => i.data.input_mode)
 
   const apply = async (ids: string[], checked: boolean) => {
     if (ids.length === 0) return
@@ -38,6 +42,7 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
       <div className="toolbar">
         <div>
           チェック済 <b>{checkedCount}</b> ／ {items.length}件
+          {agg && <span className="badge cat" style={{ marginLeft: 8 }}>合計で入力</span>}
           {checkedCount === items.length ? <span className="badge status-checked" style={{ marginLeft: 8 }}>すべて確認済み</span> : <span className="small muted">　すべての明細を確認すると計算できます</span>}
         </div>
         {!locked && (
@@ -57,8 +62,9 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
             <tr>
               <th>{!locked && <input type="checkbox" aria-label="すべて選ぶ" checked={selected.size === items.length} onChange={(e) => setSelected(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())} />}</th>
               <th>状態</th>
-              <th>元ファイルの行</th>
-              {cfg.fields.map((f) => <th key={f.key}>{f.label}</th>)}
+              <th>{manual ? '入力の行' : '元ファイルの行'}</th>
+              {cfg.fields.map((f) => <th key={f.key}>{label(f.key, f.label)}</th>)}
+              {agg && <th className="num">{cfg.manual.aggregate.countLabel}</th>}
               <th>確認日時</th>
             </tr>
           </thead>
@@ -76,6 +82,7 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
                     </td>
                   )
                 })}
+                {agg && <td className="num">{i.data.count === null || i.data.count === undefined ? '' : Number(i.data.count).toLocaleString('ja-JP')}</td>}
                 <td className="small muted">{formatDateTime(i.checked_at)}</td>
               </tr>
             ))}
