@@ -192,8 +192,10 @@ const GEN: Record<string, Gen> = {
   }),
   LOANS: ({ code, k, pt }) => ({
     rows: [
-      { lender: `${code === 'S10' ? 'アジア開発銀行' : '東都銀行'} シンジケートローン`, borrow_date: '2025-10-01', maturity: '2030-09-30', principal: r1000(500_000_000 * k), fee: r1000(7_500_000 * k), balance: r1000(500_000_000 * k * (1 - pt.year * 0.1)) },
-      ...(pt.year === 1 ? [{ lender: '中央信託銀行 タームローン', borrow_date: '2026-05-01', maturity: '2031-04-30', principal: r1000(200_000_000 * k), fee: r1000(3_000_000 * k), balance: r1000(200_000_000 * k) }] : []),
+      { kind: '借入金', lender: `${code === 'S10' ? 'アジア開発銀行' : '東都銀行'} シンジケートローン`, borrow_date: '2025-10-01', maturity: '2030-10-01', principal: r1000(500_000_000 * k), coupon_rate: 1.0, fee: r1000(7_500_000 * k) },
+      ...(pt.year === 1 ? [{ kind: '借入金', lender: '中央信託銀行 タームローン', borrow_date: '2026-05-01', maturity: '2031-05-01', principal: r1000(200_000_000 * k), coupon_rate: 1.2, fee: r1000(3_000_000 * k) }] : []),
+      ...(['S04', 'S10'].includes(code) ? [{ kind: '貸付金', lender: '関連会社への貸付（無利息）', borrow_date: '2025-04-01', maturity: '2028-04-01', principal: r1000(50_000_000 * k), coupon_rate: 0, fee: 0, market_rate: 2.0 }] : []),
+      ...(code === 'S06' ? [{ kind: '社債', lender: '第1回無担保社債', borrow_date: '2025-07-01', maturity: '2030-07-01', principal: 300_000_000, coupon_rate: 0.8, fee: 4_200_000 }] : []),
     ],
   }),
   DEV_PROJECTS: ({ code, k, pt }) => {
@@ -205,6 +207,33 @@ const GEN: Record<string, Gen> = {
       ],
     }
   },
+  RECEIVABLES_AGING: ({ code, k, r, pt }) => {
+    const base = 900_000_000 * k * (1 + pt.year * 0.05)
+    const late = ['S05', 'S08'].includes(code) ? 2 : 1 // 延滞が多い会社
+    const f = { not_due: r1000(base * 0.9), past_30: r1000(base * 0.06 * late), past_90: r1000(base * 0.02 * late), past_180: r1000(base * 0.006 * late), past_over: r1000(base * 0.002 * late * (1 + r())), credit_impaired: r1000(3_000_000 * k * late) }
+    // 日本基準：一般債権は過去の貸倒実績率（0.5%）、破産更生債権等は全額
+    const general = f.not_due + f.past_30 + f.past_90 + f.past_180 + f.past_over
+    return { fields: { ...f, jgaap_allowance: r1000(general * 0.005 + f.credit_impaired) } }
+  },
+  IMPAIRMENT_TEST: ({ code, k, pt }) => {
+    // 業績が悪い拠点：割引前CFは帳簿価額を上回る（日本基準は減損しない）が、回収可能価額は下回る
+    if (!['S03', 'S05', 'S07', 'S09'].includes(code)) return { none: true }
+    const bv = r1000(380_000_000 * k * (1 - pt.year * 0.04))
+    return { rows: [{ group: code === 'S03' ? '大阪物流センター' : '第2工場', book_value: bv, undiscounted_cf: r1000(bv * 1.08), recoverable: r1000(bv * (0.86 - pt.year * 0.03)), jgaap_loss: 0 }] }
+  },
+  PROVISIONS_LIST: ({ code, k, pt }) => ({
+    rows: [
+      { name: '賞与引当金', purpose: '夏季賞与', ifrs: '計上できる', balance: r1000(60_000_000 * k) },
+      { name: '修繕引当金', purpose: '設備の定期修繕', ifrs: '計上できない', balance: r1000(30_000_000 * k * (1 + pt.year * 0.15 + pt.months / 48)) },
+      ...(['S02', 'S06', 'S07'].includes(code) ? [{ name: '特別修繕引当金', purpose: '船舶・炉の定期検査', ifrs: '計上できない', balance: r1000(18_000_000 * k * (1 + pt.months / 24)) }] : []),
+    ],
+  }),
+  LT_BENEFITS: ({ code, k, pt }) => ({
+    rows: [
+      { plan: '永年勤続表彰', people: Math.round(150 * k), future_payment: r1000(30_000_000 * k * (1 + pt.year * 0.03)), avg_years: 11 + pt.year, req_years: 20, jgaap_balance: 0 },
+      ...(['S01', 'S04', 'S09'].includes(code) ? [{ plan: 'リフレッシュ休暇', people: Math.round(120 * k), future_payment: r1000(12_000_000 * k), avg_years: 6, req_years: 10, jgaap_balance: 0 }] : []),
+    ],
+  }),
   TAX: ({ k, pt, taxRate }) => ({
     fields: { statutory_rate: Math.round(taxRate * 10000) / 100, company_class: '分類2', deductible_td: r1000(85_000_000 * k * (1 + pt.year * 0.05)), tax_loss: 0, valuation_allowance: r1000(12_000_000 * k * (1 - pt.year * 0.1)) },
   }),
@@ -228,12 +257,14 @@ export const PACKAGE_ISSUES: Record<string, IssueRule> = {
   EIR: { form: 'LOANS', mode: 'balance', main: 'EIR_MAIN', tax: 'EIR_TAX' },
   DEVELOPMENT: { form: 'DEV_PROJECTS', mode: 'flow', main: 'DEV_MAIN', tax: 'DEV_TAX' },
   TAX_EFFECT: { form: 'TAX', mode: 'balance', main: 'TAX_RECOVERABILITY' },
+  ECL: { form: 'RECEIVABLES_AGING', mode: 'full', main: 'ECL_MAIN', tax: 'ECL_TAX' },
+  IMPAIRMENT: { form: 'IMPAIRMENT_TEST', mode: 'balance', main: 'IMP_MAIN', tax: 'IMP_TAX' },
+  PROVISION: { form: 'PROVISIONS_LIST', mode: 'balance', main: 'PROV_MAIN', tax: 'PROV_TAX' },
+  LT_BENEFITS: { form: 'LT_BENEFITS', mode: 'balance', main: 'LTB_MAIN', tax: 'LTB_TAX' },
 }
 
-const monthsBetween = (a: string, b: string) => monthIdx(b) - monthIdx(a)
-
-// プレビューにない計算（株式報酬・借入手数料の残高・回収可能性）
-function customEntries(issue: string, d: EntryData, asOf: string, months: number, taxRate: number): PreviewEntry[] | null {
+// プレビューにない計算（株式報酬・回収可能性）
+function customEntries(issue: string, d: EntryData, months: number): PreviewEntry[] | null {
   const ln = (side: 'debit' | 'credit', account: string, amount: number, formula: string) => ({ side, account, amount, formula, refs: [], external: [] })
   const pair = (dr: string, cr: string, v: number, formula: string, title: string): PreviewEntry[] => {
     const a = Math.round(v)
@@ -245,22 +276,6 @@ function customEntries(issue: string, d: EntryData, asOf: string, months: number
     const cost = (d.rows ?? []).reduce((s, r) => s + Number(r.units ?? 0) * Number(r.fair_value ?? 0) / 24 * months, 0)
     return pair('BS_SHARE_OPTIONS', 'PL_SHARE_COMP', cost * 0.05, `費用 ${Math.round(cost).toLocaleString('ja-JP')} × 失効見込み 5%`, '株式報酬：失効見込みの反映')
   }
-  if (issue === 'EIR') {
-    // 借入手数料のうち、まだ費用にしていない額（残りの期間に配分）。日本基準は支払時に費用処理
-    let total = 0
-    for (const r of d.rows ?? []) {
-      const b = String(r.borrow_date ?? '')
-      const m = String(r.maturity ?? '')
-      if (!b || !m || b > asOf) continue
-      const term = Math.max(monthsBetween(b, m), 1)
-      const elapsed = Math.min(monthsBetween(b, asOf) + 1, term)
-      total += Number(r.fee ?? 0) * (1 - elapsed / term)
-    }
-    return [
-      ...pair('BS_BORROWINGS', 'PL_FINANCE_COST', total, '手数料 × 残りの期間 ÷ 借入期間', '借入手数料を借入期間に配分（実効金利法の簡易計算）'),
-      ...pair('PL_DEFERRED_TAX', 'BS_DTA', total * taxRate, `× 実効税率 ${(taxRate * 100).toFixed(2)}%`, '税効果'),
-    ]
-  }
   if (issue === 'TAX_EFFECT') {
     // IFRSでは将来の課税所得の見込みで判断し、評価性引当額の一部（25%）を繰延税金資産として認める
     const va = Number(d.fields?.valuation_allowance ?? 0)
@@ -270,9 +285,9 @@ function customEntries(issue: string, d: EntryData, asOf: string, months: number
 }
 
 // 1つの時点の仕訳（区分ごとに、科目の借方プラスの金額）
-function journalAt(issue: string, form: PackageForm, d: EntryData, ctx: PreviewContext, months: number, taxRate: number) {
+function journalAt(issue: string, form: PackageForm, d: EntryData, ctx: PreviewContext, months: number) {
   const rule = PACKAGE_ISSUES[issue]
-  const entries = customEntries(issue, d, ctx.asOf, months, taxRate) ?? previewFor(form, d, ctx).entries
+  const entries = customEntries(issue, d, months) ?? previewFor(form, d, ctx).entries
   const out = new Map<string, { title: string; formula: string; net: Map<string, number> }>()
   for (const e of entries) {
     const cat = /税効果/.test(e.title) && rule.tax ? rule.tax : rule.main
@@ -371,7 +386,12 @@ export async function insertTestData(progress: Progress = () => {}) {
   // 会社×時点、適用の論点、税率・前提値
   const points = new Map(m.companies.map((c) => [c.id, pointsOf(m, c.id)]))
   const pids = [...points.values()].flat().map((p) => p.period.id)
-  const pol = must(await supabase.from('v_policy_matrix').select('period_id, issue_code, applicability, params').in('period_id', pids)) as { period_id: string; issue_code: string; applicability: string | null; params: Record<string, unknown> }[]
+  // 時点×論点は1000行（1回の応答の上限）を超えるため、20時点ずつ読む
+  type Pol = { period_id: string; issue_code: string; applicability: string | null; params: Record<string, unknown> }
+  const pol: Pol[] = []
+  for (let i = 0; i < pids.length; i += 20) {
+    pol.push(...(must(await supabase.from('v_policy_matrix').select('period_id, issue_code, applicability, params').in('period_id', pids.slice(i, i + 20))) as Pol[]))
+  }
   const applied = (pid: string, issue: string) => pol.some((x) => x.period_id === pid && x.issue_code === issue && x.applicability === 'applied')
   const paramsOf = (pid: string) => Object.fromEntries(pol.filter((x) => x.period_id === pid).map((x) => [x.issue_code, x.params ?? {}])) as Record<string, Record<string, unknown>>
   const taxOf = (pid: string) => Number(paramsOf(pid).TAX_EFFECT?.effective_tax_rate ?? 0.3062)
@@ -438,7 +458,7 @@ export async function insertTestData(progress: Progress = () => {}) {
           asOf: pt.period.end_date, periodStart: pt.period.start_date, taxRate: taxOf(pt.period.id), params: paramsOf(pt.period.id),
           other: (fc) => dataOf.get(`${c.id}|${fc}|${pt.period.id}`),
         }
-        return journalAt(issue, form, d, ctx, pt.months, taxOf(pt.period.id))
+        return journalAt(issue, form, d, ctx, pt.months)
       }
       for (const pt of pts) {
         if (!applied(pt.period.id, issue)) continue

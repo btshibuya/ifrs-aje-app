@@ -4,6 +4,7 @@
 
 import type { PackageForm } from './materials'
 import type { EntryData } from './package'
+import { computeEir } from './eir'
 
 // 参照：様式の項目（明細の様式は行番号つき）、または様式の外の値（方針の率・他の様式・取り込んだ明細）
 export interface Ref { key: string; row?: number }
@@ -221,26 +222,135 @@ const RULES: Record<string, Rule> = {
   },
 
   LOANS: (d, ctx) => {
-    if (d.none) return { entries: [], message: '手数料を支払った借入金がないため、仕訳はありません。' }
+    if (d.none) return { entries: [], message: '手数料のある貸付金・借入金・社債や、低い金利の契約がないため、仕訳はありません。' }
+    const lines: PreviewLine[] = []
+    let expense = 0
+    const refsAll: Ref[] = []
+    ;(d.rows ?? []).forEach((r, i) => {
+      const principal = num(r.principal)
+      const coupon = num(r.coupon_rate)
+      const fee = num(r.fee) ?? 0
+      const market = num(r.market_rate)
+      const b = typeof r.borrow_date === 'string' ? r.borrow_date : ''
+      const m = typeof r.maturity === 'string' ? r.maturity : ''
+      if (principal === null || coupon === null || !b || !m || b > ctx.asOf) return
+      const e = computeEir({ start: b, maturity: m, principal, couponRate: coupon / 100, fee, marketRate: market === null ? null : market / 100 })
+      if (!e) return
+      // 日本基準は元本のまま（手数料は支払時・受取時の損益）。IFRSは償却原価
+      const matured = ctx.asOf >= m
+      const diff = (matured ? 0 : e.amortizedCost(ctx.asOf)) - (matured ? 0 : principal)
+      const name = String(r.lender ?? `${i + 1}行目`)
+      const refs = [{ key: 'principal', row: i }, { key: 'coupon_rate', row: i }, { key: 'fee', row: i }, { key: 'borrow_date', row: i }, { key: 'maturity', row: i }, ...(market !== null ? [{ key: 'market_rate', row: i }] : [])]
+      const formula = `${name}：実効金利 ${(e.annualRate * 100).toFixed(3)}%（当初の帳簿価額 ${fmt(e.initial)}）で計算した期末の償却原価 ${fmt(principal + diff)} − 元本 ${fmt(principal)}`
+      const kind = String(r.kind ?? '借入金')
+      if (kind === '貸付金') {
+        // 資産が小さくなる＝収益（利息）を後の期に回す
+        lines.push(...pair('PL_FINANCE_INCOME', 'BS_LOANS_RECEIVABLE', -diff, formula, refs))
+        expense += -diff
+      } else {
+        // 負債が小さくなる＝費用（手数料）を後の期に回す
+        lines.push(...pair(kind === '社債' ? 'BS_BONDS' : 'BS_BORROWINGS', 'PL_FINANCE_COST', -diff, formula, refs))
+        expense += diff
+      }
+      refsAll.push(...refs)
+    })
+    if (lines.length === 0) return { entries: [], message: '明細を入力すると、仕訳を表示します（実行日が基準日より後の契約は含めません）。' }
+    const entries: PreviewEntry[] = [{ title: '償却原価への調整（実効金利法）', note: '元本を満期に一括で返し、利息を毎月払う契約として計算します。', lines }]
+    const t = taxEntry(expense, ctx, refsAll, [])
+    if (t) entries.push(t)
+    return { entries }
+  },
+
+  RECEIVABLES_AGING: (d, ctx) => {
+    const f = d.fields ?? {}
+    const rates = ctx.params.ECL?.loss_rates as number[] | undefined
+    const ci = num(ctx.params.ECL?.credit_impaired_rate) ?? 1
+    if (!Array.isArray(rates) || rates.length < 5) return { entries: [], message: '会社別方針に、延滞日数ごとの損失率（予想信用損失）が設定されていません。' }
+    const keys = ['not_due', 'past_30', 'past_90', 'past_180', 'past_over'] as const
+    const labels = ['期日前', '30日以内', '31〜90日', '91〜180日', '181日以上']
+    const amounts = keys.map((k) => num(f[k]))
+    const ciAmount = num(f.credit_impaired)
+    const jgaap = num(f.jgaap_allowance)
+    if (amounts.some((a) => a === null) || ciAmount === null || jgaap === null) return { entries: [], message: '年齢別の残高と、日本基準の貸倒引当金を入力すると、仕訳を表示します。' }
+    const ecl = amounts.reduce((s: number, a, i) => s + (a as number) * rates[i], 0) + ciAmount * ci
+    const adj = ecl - jgaap
+    const refs = [...keys.map((key) => ({ key })), { key: 'credit_impaired' }, { key: 'jgaap_allowance' }]
+    const ext = [`損失率 ${labels.map((l, i) => `${l} ${pct(rates[i])}`).join('・')}・破産更生など ${pct(ci)}（会社別方針）`]
+    const entries: PreviewEntry[] = [{
+      title: '予想信用損失による貸倒引当金の調整（洗替：期末の全額）',
+      lines: pair('PL_BAD_DEBT', 'BS_ALLOWANCE', adj, `予想信用損失 ${fmt(ecl)} − 日本基準の貸倒引当金 ${fmt(jgaap)}`, refs, ext),
+    }]
+    if (Math.round(adj) === 0) return { entries: [], message: '予想信用損失と日本基準の貸倒引当金が同じため、調整はありません。' }
+    const t = taxEntry(adj, ctx, refs, ext)
+    if (t) entries.push(t)
+    return { entries }
+  },
+
+  IMPAIRMENT_TEST: (d, ctx) => {
+    if (d.none) return { entries: [], message: '減損の兆候がある資産グループがないため、仕訳はありません。' }
     const lines: PreviewLine[] = []
     let total = 0
     const refsAll: Ref[] = []
     ;(d.rows ?? []).forEach((r, i) => {
-      const fee = num(r.fee)
-      const b = typeof r.borrow_date === 'string' ? r.borrow_date : ''
-      const m = typeof r.maturity === 'string' ? r.maturity : ''
-      if (fee === null || !b || !m || b < ctx.periodStart || b > ctx.asOf) return
-      const term = Math.max(monthsBetween(b, m), 1)
-      const elapsed = Math.min(Math.max(monthsBetween(b, ctx.asOf) + 1, 1), term)
-      const deferred = fee * (1 - elapsed / term)
-      const refs = [{ key: 'fee', row: i }, { key: 'borrow_date', row: i }, { key: 'maturity', row: i }]
-      lines.push(...pair('BS_BORROWINGS', 'PL_FINANCE_COST', deferred, `${String(r.lender ?? `${i + 1}行目`)}：手数料 ${fmt(fee)} × 残り ${term - elapsed}か月 ÷ ${term}か月`, refs))
-      total += deferred
+      const bv = num(r.book_value)
+      const ucf = num(r.undiscounted_cf)
+      const rec = num(r.recoverable)
+      if (bv === null || ucf === null || rec === null) return
+      // 日本基準は、割引前の将来キャッシュ・フローが帳簿価額を下回るときだけ減損する。上回っていて回収可能価額が下回る分が、IFRSだけの減損
+      if (ucf < bv || rec >= bv) return
+      const refs = [{ key: 'book_value', row: i }, { key: 'undiscounted_cf', row: i }, { key: 'recoverable', row: i }]
+      lines.push(...pair('PL_IMPAIRMENT', 'BS_PPE_ADJ', bv - rec, `${String(r.group ?? `${i + 1}行目`)}：帳簿価額 ${fmt(bv)} − 回収可能価額 ${fmt(rec)}（割引前CF ${fmt(ucf)} が帳簿価額以上のため、日本基準では減損しない）`, refs))
+      total += bv - rec
       refsAll.push(...refs)
     })
-    if (lines.length === 0) return { entries: [], message: '当期に借り入れた明細を入力すると、仕訳を表示します。' }
-    const entries: PreviewEntry[] = [{ title: '借入手数料を借入期間に配分（実効金利法の簡易計算）', lines }]
+    if (lines.length === 0) return { entries: [], message: '日本基準とIFRSで減損の結果が同じため、調整はありません（IFRSだけで減損になるのは、割引前CFは帳簿価額以上で、回収可能価額が帳簿価額を下回る場合です）。' }
+    const entries: PreviewEntry[] = [{ title: 'IFRSだけで必要な減損損失', note: '減損したあとの減価償却費の違いは、簡易計算のため含めていません。', lines }]
+    const t = taxEntry(total, ctx, refsAll, [])
+    if (t) entries.push(t)
+    return { entries }
+  },
+
+  PROVISIONS_LIST: (d, ctx) => {
+    if (d.none) return { entries: [], message: '引当金がないため、仕訳はありません。' }
+    const lines: PreviewLine[] = []
+    let total = 0
+    const refsAll: Ref[] = []
+    ;(d.rows ?? []).forEach((r, i) => {
+      const bal = num(r.balance)
+      if (bal === null || r.ifrs !== '計上できない') return
+      const refs = [{ key: 'balance', row: i }, { key: 'ifrs', row: i }]
+      lines.push(...pair('BS_PROVISIONS', 'PL_PROVISION_EXP', bal, `${String(r.name ?? `${i + 1}行目`)}：期末残高 ${fmt(bal)} を取り消す`, refs))
+      total += bal
+      refsAll.push(...refs)
+    })
+    if (lines.length === 0) return { entries: [], message: '「計上できない」とした引当金があると、取り消す仕訳を表示します（「判断中」は親会社と相談してください）。' }
+    const entries: PreviewEntry[] = [{ title: 'IFRSで計上できない引当金の取消し', lines }]
     const t = taxEntry(-total, ctx, refsAll, [])
+    if (t) entries.push(t)
+    return { entries }
+  },
+
+  LT_BENEFITS: (d, ctx) => {
+    if (d.none) return { entries: [], message: '永年勤続表彰などの制度がないため、仕訳はありません。' }
+    const lines: PreviewLine[] = []
+    let total = 0
+    const refsAll: Ref[] = []
+    ;(d.rows ?? []).forEach((r, i) => {
+      const pay = num(r.future_payment)
+      const avg = num(r.avg_years)
+      const req = num(r.req_years)
+      const jg = num(r.jgaap_balance) ?? 0
+      if (pay === null || avg === null || !req) return
+      // これまでの勤務に対応する分を負債にする（勤続年数で按分。簡易計算のため割り引かない）
+      const obligation = pay * Math.min(1, avg / req)
+      const refs = [{ key: 'future_payment', row: i }, { key: 'avg_years', row: i }, { key: 'req_years', row: i }, { key: 'jgaap_balance', row: i }]
+      lines.push(...pair('PL_SALARY', 'BS_LT_BENEFITS', obligation - jg, `${String(r.plan ?? `${i + 1}行目`)}：支給見込額 ${fmt(pay)} × 勤続 ${avg}年 ÷ ${req}年 − 日本基準の計上額 ${fmt(jg)}`, refs))
+      total += obligation - jg
+      refsAll.push(...refs)
+    })
+    if (lines.length === 0) return { entries: [], message: '制度の明細を入力すると、仕訳を表示します。' }
+    const entries: PreviewEntry[] = [{ title: 'その他の長期従業員給付の負債計上', note: '勤続年数で按分した簡易計算です（割引・退職の見込みは支給見込額に含めてください）。', lines }]
+    const t = taxEntry(total, ctx, refsAll, [])
     if (t) entries.push(t)
     return { entries }
   },
@@ -261,4 +371,6 @@ export const FALLBACK_ACCOUNT_NAMES: Record<string, string> = {
   BS_RETIREMENT_LIAB: '退職給付に係る負債', BS_INVESTMENTS: '投資有価証券', OCI_FVOCI: 'FVOCI資本性金融商品の公正価値の変動', PL_FINANCE_INCOME: '金融収益',
   BS_GOODWILL: 'のれん', PL_GOODWILL_AMORT: 'のれん償却額', BS_DEFERRED_INCOME: '繰延収益（政府補助金）', BS_ARO: '資産除去債務',
   BS_INTANGIBLE: '無形資産（開発資産）', PL_RND: '研究開発費', BS_BORROWINGS: '借入金', PL_FINANCE_COST: '金融費用',
+  BS_LOANS_RECEIVABLE: '貸付金', BS_BONDS: '社債', BS_ALLOWANCE: '貸倒引当金', PL_BAD_DEBT: '貸倒引当金繰入額', PL_IMPAIRMENT: '減損損失',
+  BS_PROVISIONS: '引当金', PL_PROVISION_EXP: '引当金繰入額', BS_LT_BENEFITS: 'その他の長期従業員給付', BS_SHARE_OPTIONS: '新株予約権（株式報酬）', PL_SHARE_COMP: '株式報酬費用',
 }

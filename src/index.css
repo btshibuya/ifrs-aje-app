@@ -859,3 +859,25 @@ tr.ws-row-on > * { background-image: linear-gradient(var(--primary-soft), var(--
 .cons-missing, .cons-alert { margin-bottom: 12px; }
 .testdata-bar { height: 10px; border-radius: 999px; background: var(--viz-st-not_started); overflow: hidden; }
 .testdata-bar > span { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width .4s; }
+
+/* 論点の解説 ------------------------------------------------------------------ */
+.issue-help { display: inline-block; margin-top: 3px; font-size: 10px; font-weight: 400; border: 1px solid var(--primary-border); border-radius: 999px; padding: 0 6px; background: var(--surface); }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.help-card { display: flex; flex-direction: column; gap: 4px; color: var(--text); }
+.help-card:hover { border-color: var(--primary); text-decoration: none; }
+.help-card-head { display: flex; align-items: center; gap: 8px; }
+.help-card-head .issue-no-lg { flex: none; }
+.help-card-summary { margin: 4px 0 0; color: #3d4b5c; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.help-card-more { margin-top: auto; color: var(--primary); }
+.help-page { max-width: 1000px; display: flex; flex-direction: column; gap: 12px; }
+.help-page .page-header { margin-bottom: 0; }
+.help-standard { margin: -4px 0 0; color: var(--muted); }
+.help-h2 { font-size: 15px; margin: 0 0 8px; }
+.help-text { margin: 0; line-height: 1.8; }
+.help-diff th[scope=row] { white-space: normal; min-width: 120px; font-weight: 600; background: var(--tint); }
+.help-diff td { white-space: normal; line-height: 1.6; min-width: 180px; }
+.help-diff thead th:nth-child(2) { color: var(--muted); }
+.help-journal { margin: 0; font-family: inherit; background: var(--tint); border-left: 3px solid var(--primary); border-radius: 0 6px 6px 0; padding: 8px 10px; line-height: 1.7; }
+.help-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 12px; }
+.help-nav { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 4px 0 12px; }
+@media (max-width: 640px) { .help-diff td { min-width: 140px; } }

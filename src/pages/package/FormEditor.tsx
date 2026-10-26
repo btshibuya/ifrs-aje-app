@@ -2,6 +2,7 @@
 // アシスト：入力例・見る場所・用語の説明、全角や△の数字の読み替え、自動計算、整合チェック、
 //           前期から大きく変わった項目の理由入力、前回の値のコピー、自動保存
 
+import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { ErrorBox, formatDateTime } from '../../components/ui'
@@ -253,7 +254,7 @@ export default function FormEditor({ form, issueNo, companyId, asOf, dates, entr
       <div className="pkg-form-head">
         <div>
           <h2><span className="issue-no-sm">{issueNo}</span>{form.title}</h2>
-          <p className="small">{form.intro}</p>
+          <p className="small">{form.intro} <Link to={`/help/${form.issueCode}`} className="nowrap">この論点の解説 ›</Link></p>
         </div>
       </div>
       <div className="pkg-form-grid">

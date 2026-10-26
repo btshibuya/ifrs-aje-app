@@ -8,6 +8,7 @@ import ThemePicker from './components/ThemePicker'
 import ChangeLogPage from './pages/ChangeLogPage'
 import ChecksPage from './pages/ChecksPage'
 import ConsolidationPage from './pages/consolidation/ConsolidationPage'
+import HelpPage from './pages/HelpPage'
 import HomePage from './pages/HomePage'
 import ImpactPage from './pages/ImpactPage'
 import MastersPage from './pages/MastersPage'
@@ -29,13 +30,14 @@ const NAV = [
   { to: '/checks', label: 'チェック' },
   { to: '/logs', label: '変更履歴' },
   { to: '/masters', label: 'マスタ' },
+  { to: '/help', label: '論点の解説' },
 ]
 
 // ブラウザのタブ名に、いまの画面名を出す
 const TITLES: [RegExp, string][] = [
   [/^\/$/, 'ホーム'], [/^\/progress/, '進捗一覧'], [/^\/materials/, '資料一覧'], [/^\/package/, '収集パッケージ'], [/^\/consolidation/, '連結精算表'],
   [/^\/policies/, '会社別方針一覧'], [/^\/work/, '作業画面'], [/^\/report/, '検証レポート'], [/^\/impact/, '論点別影響額'], [/^\/checks/, 'チェック'],
-  [/^\/logs/, '変更履歴'], [/^\/masters/, 'マスタ'],
+  [/^\/logs/, '変更履歴'], [/^\/masters/, 'マスタ'], [/^\/help/, '論点の解説'],
 ]
 function TitleSync() {
   const { pathname } = useLocation()
@@ -90,6 +92,8 @@ export default function App() {
             <Route path="/checks" element={<ChecksPage />} />
             <Route path="/logs" element={<ChangeLogPage />} />
             <Route path="/masters" element={<MastersPage />} />
+            <Route path="/help" element={<HelpPage />} />
+            <Route path="/help/:code" element={<HelpPage />} />
           </Routes>
         </main>
       </div>

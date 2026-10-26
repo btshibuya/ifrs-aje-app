@@ -26,10 +26,13 @@ const PARAM_LABELS: Record<string, string> = {
   incremental_borrowing_rate: '追加借入利子率',
   default_classification: '株式の分類',
   jgaap_property_tax_method: '日本基準の処理',
+  loss_rates: '損失率',
+  credit_impaired_rate: '破産更生などの損失率',
 }
 
 const formatParam = (k: string, v: unknown) =>
-  typeof v === 'number' && k.endsWith('_rate') ? `${(v * 100).toFixed(2)}%` : String(v)
+  Array.isArray(v) ? v.map((x) => (typeof x === 'number' ? `${(x * 100).toFixed(1)}%` : String(x))).join('・')
+    : typeof v === 'number' && k.endsWith('_rate') ? `${(v * 100).toFixed(2)}%` : String(v)
 
 export default function PolicyPage() {
   const [slot, setSlot] = useSlot()

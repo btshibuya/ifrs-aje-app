@@ -46,3 +46,37 @@ describe('仕訳のプレビュー', () => {
     expect(r.message).toContain('未納付額')
   })
 })
+
+describe('仕訳のプレビュー（追加した論点）', () => {
+  const c2: PreviewContext = { ...ctx, asOf: '2026-09-30', periodStart: '2026-04-01', params: { ...ctx.params, ECL: { loss_rates: [0.003, 0.01, 0.05, 0.2, 0.5], credit_impaired_rate: 1 } } }
+  it('予想信用損失：年齢別残高×損失率 − 日本基準の貸倒引当金', () => {
+    const r = previewFor(formByCode('RECEIVABLES_AGING')!, { fields: { not_due: 1_000_000, past_30: 100_000, past_90: 0, past_180: 0, past_over: 10_000, credit_impaired: 2_000, jgaap_allowance: 5_000 } }, c2)
+    // 3,000 + 1,000 + 5,000 + 2,000 = 11,000 − 5,000
+    expect(net(r, 'PL_BAD_DEBT')).toBe(6_000)
+    expect(net(r, 'BS_ALLOWANCE')).toBe(-6_000)
+  })
+  it('固定資産の減損：割引前CFが帳簿価額以上で、回収可能価額が下回る分だけIFRSで減損', () => {
+    const r = previewFor(formByCode('IMPAIRMENT_TEST')!, { rows: [
+      { group: 'A', book_value: 100, undiscounted_cf: 120, recoverable: 70 },
+      { group: 'B', book_value: 100, undiscounted_cf: 80, recoverable: 60 }, // 日本基準でも減損するため差なし
+    ] }, c2)
+    expect(net(r, 'PL_IMPAIRMENT')).toBe(30)
+  })
+  it('引当金：計上できないものだけ取り消す', () => {
+    const r = previewFor(formByCode('PROVISIONS_LIST')!, { rows: [
+      { name: '修繕引当金', ifrs: '計上できない', balance: 1_000_000 }, { name: '賞与引当金', ifrs: '計上できる', balance: 5_000_000 },
+    ] }, c2)
+    expect(net(r, 'BS_PROVISIONS')).toBe(1_000_000)
+  })
+  it('長期の従業員給付：支給見込額を勤続年数で按分し、日本基準の計上額との差を負債に', () => {
+    const r = previewFor(formByCode('LT_BENEFITS')!, { rows: [{ plan: '永年勤続表彰', future_payment: 20_000_000, avg_years: 10, req_years: 20, jgaap_balance: 1_000_000 }] }, c2)
+    expect(net(r, 'BS_LT_BENEFITS')).toBe(-9_000_000)
+  })
+  it('借入金：期末の償却原価が元本より小さい分、借入金を減らす（手数料を後の期に回す）', () => {
+    const r = previewFor(formByCode('LOANS')!, { rows: [{ kind: '借入金', lender: 'X銀行', borrow_date: '2025-10-01', maturity: '2030-10-01', principal: 500_000_000, coupon_rate: 1, fee: 7_500_000 }] }, c2)
+    const adj = net(r, 'BS_BORROWINGS')
+    expect(adj).toBeGreaterThan(0)
+    expect(adj).toBeLessThan(7_500_000)
+    expect(net(r, 'PL_FINANCE_COST')).toBe(-adj)
+  })
+})

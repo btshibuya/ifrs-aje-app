@@ -94,6 +94,7 @@ export default function ProgressPage() {
                 <th key={i.code} className={ISSUE_CONFIGS[i.code] ? 'implemented' : ''} title={i.standard_ref ?? ''}>
                   <div className="issue-no">{i.no}</div>
                   <div className="issue-name">{i.name}</div>
+                  <Link className="issue-help" to={`/help/${i.code}`} title={`${i.name}の解説`} aria-label={`${i.name}の解説`}>解説</Link>
                 </th>
               ))}
             </tr>

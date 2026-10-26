@@ -60,6 +60,7 @@ export default function WorkPage() {
           {issue.name} <span className="muted small">{issue.standard_ref}</span>
         </h1>
         <div className="page-header-tools">
+          <Link className="btn" to={`/help/${issueCode}`}>この論点の解説</Link>
           {data.run && cfg && <Link className="btn" to={`/report/${period.id}/${issueCode}`}>検証レポート</Link>}
         </div>
       </div>
