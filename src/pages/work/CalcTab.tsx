@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useFeedback } from '../../components/feedback'
 import { must, supabase } from '../../lib/supabase'
 import OverwriteImpact from './OverwriteImpact'
@@ -10,6 +10,7 @@ import {
   fetchBalances, fetchEntries, fetchMissingCarryforward, fetchSteps, planCalculation, saveCalculation,
   type ItemRow, type Period, type Run, type StepRow,
 } from '../../lib/workflow'
+import { PACKAGE_CALCS } from '../../lib/packageCalc'
 
 // 連結の基準日は、決算日が違う会社では3か月後までになる（12月決算 → 3月の連結）
 const threeMonthsLater = (d: string) => {
@@ -23,7 +24,7 @@ const MOVEMENT_LABELS: Record<string, string> = { new: '新規', continuing: '�
 const pct = (v: unknown) => (typeof v === 'number' ? `${(v * 100).toFixed(2)}%` : '—')
 
 // 計算シートの値：月数・年数・日数は金額ではないので小数をそのまま出す
-const isCount = (label: string) => /月数|年）|日数/.test(label)
+const isCount = (label: string) => /月数|年）|日数|個）|%）/.test(label)
 
 // 減価償却の集計（期首差額 − 償却額の差 − 除却時の差 ＝ 期末差額）を橋渡しの図にする
 function depreciationBridge(steps: StepRow[]): WaterfallStep[] | null {
@@ -38,6 +39,18 @@ function depreciationBridge(steps: StepRow[]): WaterfallStep[] | null {
   ]
 }
 
+// 収集パッケージの論点（借方・貸方の組が1つのとき）：期首の調整額 → 当期の変動 → 期末の調整額
+function adjustmentBridge(steps: StepRow[]): WaterfallStep[] | null {
+  const sums = steps.filter((s) => s.item_key === null && s.step_no < 90)
+  if (sums.length !== 3) return null
+  const [open, move, close] = [1, 2, 3].map((n) => Number(sums.find((s) => s.step_no === n)?.value ?? NaN))
+  if ([open, move, close].some((x) => Number.isNaN(x))) return null
+  return [
+    { key: 'open', label: '期首の調整額', value: open, kind: 'total' },
+    { key: 'move', label: '当期の変動', value: move, kind: 'delta' },
+    { key: 'close', label: '期末の調整額', value: close, kind: 'total' },
+  ]
+}
 function StepTable({ steps }: { steps: StepRow[] }) {
   return (
     <table className="compact steps">
@@ -60,6 +73,7 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
   period: Period; issueCode: string; items: ItemRow[]; run: Run | null; stale: boolean; locked: boolean; onDone: () => void
 }) {
   const fb = useFeedback()
+  const pkg = PACKAGE_CALCS[issueCode]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [openItem, setOpenItem] = useState<string | null>(null)
@@ -127,8 +141,9 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
     }
   }
 
-  // 明細の差額の棒の目盛り
-  const diffs = (details.data?.balances ?? []).map((b) => Math.round(Number(b.difference)))
+  // 明細の差額の棒の目盛り（収集パッケージの論点は期末の調整額）
+  const barValue = (b: { difference: number; extra: Record<string, unknown> }) => Number(pkg ? b.extra.adj_close ?? 0 : b.difference)
+  const diffs = (details.data?.balances ?? []).map((b) => Math.round(barValue(b)))
   const diffScale = { maxAbs: Math.max(0, ...diffs.map(Math.abs)), mixed: diffs.some((d) => d > 0) && diffs.some((d) => d < 0) }
 
   const snap = (run?.assumptions_snapshot ?? {}) as Record<string, unknown>
@@ -169,6 +184,18 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
           </div>
         </div>
       )}
+      {pkg && details.data && adjustmentBridge(details.data.steps) && (
+        <div className="card">
+          <div className="card-title">調整額の期首から期末への動き（{pkg.carry === 'reversing' ? '洗替：仕訳は期末の全額' : '累積：仕訳は当期の変動'}）</div>
+          {tooltip.node}
+          <Waterfall steps={adjustmentBridge(details.data!.steps)!} tooltip={tooltip} />
+          <div className="viz-legend">
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-pos)' }} /> 調整額を増やす（借方）</span>
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-neg)' }} /> 調整額を減らす（貸方）</span>
+            <span><span className="viz-swatch" style={{ background: 'var(--viz-total)' }} /> 期首・期末の残高</span>
+          </div>
+        </div>
+      )}
       {run && (
         <div className="card verify-card">
           <div className="card-title">
@@ -204,6 +231,7 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
             {'prior_tax_rate' in snap && <><dt>期首の実効税率</dt><dd>{pct(snap.prior_tax_rate)}</dd></>}
             {'expected_usage_rate' in snap && <><dt>消化見込率</dt><dd>{pct(snap.expected_usage_rate)}</dd></>}
             {'social_insurance_rate' in snap && <><dt>法定福利費率</dt><dd>{pct(snap.social_insurance_rate)}</dd></>}
+            {((snap.params_used as { label: string; value: string }[] | undefined) ?? []).map((x) => <Fragment key={x.label}><dt>{x.label}</dt><dd>{x.value}</dd></Fragment>)}
             <dt>前期の確定した計算</dt><dd>{snap.prior_run_id ? 'あり（前期末の残高から引き継ぎ）' : 'なし'}</dd>
           </dl>
           {rules && (
@@ -255,19 +283,24 @@ export default function CalcTab({ period, issueCode, items, run, stale, locked, 
             <div className="table-wrap">
               <table className="compact">
                 <thead>
-                  <tr><th>番号</th><th>名称</th><th className="hide-sp">区分</th><th className="num hide-sp">日本基準 期末</th><th className="num hide-sp">IFRS 期末</th><th className="num">差額</th><th>差額の大きさ</th></tr>
+                  {pkg
+                    ? <tr><th>明細</th><th>名称</th><th className="hide-sp">区分</th><th className="num hide-sp">期首の調整額</th><th className="num hide-sp">当期の変動</th><th className="num">期末の調整額</th><th>調整額の大きさ</th></tr>
+                    : <tr><th>番号</th><th>名称</th><th className="hide-sp">区分</th><th className="num hide-sp">日本基準 期末</th><th className="num hide-sp">IFRS 期末</th><th className="num">差額</th><th>差額の大きさ</th></tr>}
                 </thead>
                 <tbody>
                   {(sortByDiff
-                    ? [...details.data.balances].sort((a, b) => Math.abs(Number(b.difference)) - Math.abs(Number(a.difference)))
+                    ? [...details.data.balances].sort((a, b) => Math.abs(barValue(b)) - Math.abs(barValue(a)))
                     : details.data.balances
                   ).map((b) => (
                     <FragmentRow key={b.item_key} open={openItem === b.item_key} onToggle={() => setOpenItem(openItem === b.item_key ? null : b.item_key)}
-                      cells={[
+                      cells={pkg ? [
+                        b.item_key, String(b.extra.name ?? ''), MOVEMENT_LABELS[b.movement_type] ?? b.movement_type,
+                        <Money key="o" value={Number(b.extra.adj_open ?? 0)} />, <Money key="m" value={Number(b.extra.adj_move ?? 0)} />, <Money key="c" value={Number(b.extra.adj_close ?? 0)} />,
+                      ] : [
                         b.item_key, String(b.extra.name ?? ''), MOVEMENT_LABELS[b.movement_type] ?? b.movement_type,
                         <Money key="j" value={b.jgaap_amount} />, <Money key="i" value={b.ifrs_amount} />, <Money key="d" value={b.difference} />,
                       ]}
-                      bar={<InlineBar value={Number(b.difference)} maxAbs={diffScale.maxAbs} mixed={diffScale.mixed} />}
+                      bar={<InlineBar value={barValue(b)} maxAbs={diffScale.maxAbs} mixed={diffScale.mixed} />}
                       detail={<StepTable steps={details.data!.steps.filter((s) => s.item_key === b.item_key)} />}
                     />
                   ))}

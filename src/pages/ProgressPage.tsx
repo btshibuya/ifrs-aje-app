@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { Legend, StackedBar, useTooltip, type Segment } from '../components/charts'
 import { ApplicabilityBadge, ErrorBox, Loading, PageHeader, SlotToggle, StatusBadge } from '../components/ui'
 import { parseSlot, useAsync, useSlot } from '../lib/hooks'
-import { ISSUE_CONFIGS, STATUS_LABELS } from '../lib/issues'
+import { STATUS_LABELS } from '../lib/issues'
 import { fetchMasters, type PeriodRow } from '../lib/masters'
 import { fetchAllMaterialStates, summarize } from '../lib/package'
 import { must, supabase } from '../lib/supabase'
@@ -83,7 +83,7 @@ export default function ProgressPage() {
       </div>
       {tooltip.node}
       <p className="muted small">
-        会社×論点ごとの状況です。<b>太枠</b>の論点（有給休暇引当金・減価償却）はこのプロトタイプで計算まで動きます。ほかの論点は、収集パッケージの入力から作った仕訳を見られます。セルを押すと作業画面に移ります。
+        会社×論点ごとの状況です。17論点すべて、取込・明細チェック・計算・確定まで動きます（有給休暇引当金・減価償却はファイルの取込、ほかの論点は収集パッケージの取込）。セルを押すと作業画面に移ります。
       </p>
       <div className="table-wrap">
         <table className="matrix">
@@ -91,7 +91,7 @@ export default function ProgressPage() {
             <tr>
               <th className="sticky-col">会社</th>
               {m.issues.map((i) => (
-                <th key={i.code} className={ISSUE_CONFIGS[i.code] ? 'implemented' : ''} title={i.standard_ref ?? ''}>
+                <th key={i.code} title={i.standard_ref ?? ''}>
                   <div className="issue-no">{i.no}</div>
                   <div className="issue-name">{i.name}</div>
                   <Link className="issue-help" to={`/help/${i.code}`} title={`${i.name}の解説`} aria-label={`${i.name}の解説`}>解説</Link>
@@ -120,11 +120,9 @@ export default function ProgressPage() {
                     if (!p) return <td key={i.code} />
                     const a = app.get(`${p.id}|${i.code}`) ?? null
                     const s = status.get(`${p.id}|${i.code}`) ?? 'not_started'
-                    const implemented = !!ISSUE_CONFIGS[i.code]
                     const cell = a === 'applied' ? <StatusBadge status={s} /> : <ApplicabilityBadge value={a} />
                     return (
-                      <td key={i.code} className={implemented ? 'implemented' : ''}>
-                        {/* 計算まで実装していない論点も、仕訳（収集パッケージから作ったもの）を見られる */}
+                      <td key={i.code}>
                         <Link to={`/work/${p.id}/${i.code}`} className="cell-link">{cell}</Link>
                       </td>
                     )
@@ -139,7 +137,7 @@ export default function ProgressPage() {
               {m.issues.map((i) => {
                 const rec = byIssue.get(i.code)
                 return (
-                  <td key={i.code} className={ISSUE_CONFIGS[i.code] ? 'implemented' : ''}>
+                  <td key={i.code}>
                     {rec ? (
                       <div className="issue-rate">
                         <StackedBar segments={toSegments(rec)} height={6} tooltip={tooltip} />

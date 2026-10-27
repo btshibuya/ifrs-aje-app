@@ -137,7 +137,6 @@ tr.detail-row > td { background: #fafbfc; padding: 10px 16px 14px 32px; }
 .matrix thead th { vertical-align: bottom; }
 .matrix .sticky-col { position: sticky; left: 0; background: var(--surface); z-index: 2; min-width: 210px; font-weight: 500; }
 .matrix thead .sticky-col { background: var(--tint); z-index: 3; }
-.matrix th.implemented, .matrix td.implemented { box-shadow: inset 2px 0 0 var(--primary), inset -2px 0 0 var(--primary); }
 .issue-no { font-size: 11px; color: var(--muted); }
 .issue-name { font-size: 11px; line-height: 1.35; }
 .issue-no-lg { background: var(--primary); color: #fff; border-radius: 50%; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
@@ -881,3 +880,8 @@ tr.ws-row-on > * { background-image: linear-gradient(var(--primary-soft), var(--
 .help-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 12px; }
 .help-nav { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 4px 0 12px; }
 @media (max-width: 640px) { .help-diff td { min-width: 140px; } }
+
+/* 収集パッケージから取り込む論点：元にする様式の状況 */
+.pkg-source-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.pkg-source-line:last-of-type { border-bottom: none; }
+.pkg-source-line > div { flex-basis: 100%; }

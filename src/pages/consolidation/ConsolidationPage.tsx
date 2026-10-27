@@ -164,7 +164,7 @@ export default function ConsolidationPage() {
         <div className="stat">
           <div className="stat-label">当期の計算（会社×論点）</div>
           <div className="stat-value">{counts.final}<span className="small muted"> 確定</span> {counts.draft > 0 && <span className="warn-text">{counts.draft}<span className="small"> 下書き</span></span>} {counts.missing > 0 && <span className="text-error">{counts.missing}<span className="small"> 未計算</span></span>}</div>
-          <div className="small muted">{counts.stale > 0 ? <span className="warn-text">うち再計算待ち {counts.stale}件</span> : `${d.targets.length}社が対象（計算まで実装している論点）`}</div>
+          <div className="small muted">{counts.stale > 0 ? <span className="warn-text">うち再計算待ち {counts.stale}件</span> : `${d.targets.length}社が対象（適用の論点）`}</div>
         </div>
       </div>
 

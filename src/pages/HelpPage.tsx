@@ -4,6 +4,7 @@ import { ErrorBox, Loading, PageHeader } from '../components/ui'
 import { helpOf } from '../lib/help'
 import { useAsync } from '../lib/hooks'
 import { ISSUE_CONFIGS } from '../lib/issues'
+import { PACKAGE_CALCS } from '../lib/packageCalc'
 import { fetchMasters } from '../lib/masters'
 import { PACKAGE_FORMS } from '../lib/materials'
 
@@ -87,7 +88,7 @@ export default function HelpPage() {
           <h2 className="help-h2">このアプリでの扱い</h2>
           <p className="help-text">{h.inApp}</p>
           <p className="small" style={{ margin: '6px 0 0' }}>
-            {ISSUE_CONFIGS[code] ? '作業画面で、取込・明細チェック・計算・確定まで行えます。' : '作業画面では、収集パッケージの入力から作った仕訳を確認・確定できます。'}
+            {ISSUE_CONFIGS[code] ? '作業画面で、取込・明細チェック・計算・確定まで行えます。' : PACKAGE_CALCS[code] ? '作業画面で、収集パッケージの入力を明細として取り込み、明細チェック・計算・確定まで行えます。仕訳の1行から計算シート・明細・元資料までたどれます。' : '作業画面では、収集パッケージの入力から作った仕訳を確認・確定できます。'}
             {form && <> 集める様式：「{form.title}」</>}
           </p>
         </section>

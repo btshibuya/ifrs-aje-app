@@ -11,3 +11,13 @@ export function must<T>(res: { data: T; error: { message: string } | null }): T 
   if (res.error) throw new Error(res.error.message)
   return res.data
 }
+
+// 1000行を超えることがある問い合わせを、1000行ずつ読む（Supabase の API は1回に1000行までしか返さない）
+export async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += 1000) {
+    const rows = must(await page(from, from + 999)) ?? []
+    out.push(...rows)
+    if (rows.length < 1000) return out
+  }
+}

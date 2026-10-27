@@ -2,17 +2,22 @@ import { Link } from 'react-router-dom'
 import { ErrorBox, Loading, Money, PageHeader } from '../components/ui'
 import { useAsync } from '../lib/hooks'
 import { fetchMasters } from '../lib/masters'
-import { must, supabase } from '../lib/supabase'
+import { fetchAll, must, supabase } from '../lib/supabase'
 
 interface Missing { period_id: string; issue_code: string; item_key: string; balance_type: string; prior_closing_difference: number }
 interface Unbalanced { entry_id: string; period_id: string; issue_code: string; entry_no: number; debit_total: number; credit_total: number }
 
 export default function ChecksPage() {
   const { data, error, loading } = useAsync(async () => {
-    const [m, missing, unbalanced] = await Promise.all([
-      fetchMasters(), supabase.from('v_missing_carryforward').select('*'), supabase.from('v_unbalanced_entries').select('*'),
+    const [m, missing, unbalanced, ws] = await Promise.all([
+      fetchMasters(),
+      fetchAll<Missing>((from, to) => supabase.from('v_missing_carryforward').select('*').order('period_id').order('issue_code').order('item_key').range(from, to)),
+      supabase.from('v_unbalanced_entries').select('*'),
+      fetchAll<{ period_id: string; issue_code: string }>((from, to) => supabase.from('work_status').select('period_id, issue_code').neq('status', 'not_started').order('id').range(from, to)),
     ])
-    return { m, missing: must(missing) as Missing[], unbalanced: must(unbalanced) as Unbalanced[] }
+    // まだ計算していない（未着手の）会社×論点は、当期の計算がないため出さない
+    const started = new Set(ws.map((w) => `${w.period_id}|${w.issue_code}`))
+    return { m, missing: missing.filter((r) => started.has(`${r.period_id}|${r.issue_code}`)), unbalanced: must(unbalanced) as Unbalanced[] }
   }, [])
 
   if (loading && !data) return <Loading />

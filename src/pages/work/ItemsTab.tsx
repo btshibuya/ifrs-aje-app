@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { ErrorBox, formatDateTime } from '../../components/ui'
-import type { IssueConfig } from '../../lib/issues'
+import type { FieldDef, IssueConfig } from '../../lib/issues'
 import { setChecked, type ItemRow } from '../../lib/workflow'
 
-export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { periodId: string; cfg: IssueConfig; items: ItemRow[]; locked: boolean; onDone: () => void }) {
+// 収集パッケージから作る明細は、手入力の設定（manual）を持たない
+export default function ItemsTab({ periodId, cfg, items, locked, onDone, sourceLabel = 'ファイルを取り込んで' }: {
+  periodId: string; cfg: { code: string; fields: FieldDef[]; manual?: IssueConfig['manual'] }; items: ItemRow[]; locked: boolean; onDone: () => void; sourceLabel?: string
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const checkedCount = items.filter((i) => i.review_status === 'checked').length
   // 合計で入力した明細は、項目名を「〜の合計」にし、人数・件数の列を足す
   const agg = items.some((i) => i.data.input_mode === 'aggregate')
-  const label = (key: string, base: string) => (agg ? cfg.manual.aggregate.labels[key] ?? base : base)
+  const label = (key: string, base: string) => (agg ? cfg.manual?.aggregate.labels[key] ?? base : base)
   const manual = items.some((i) => i.data.input_mode)
 
   const apply = async (ids: string[], checked: boolean) => {
@@ -28,7 +31,7 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
     }
   }
 
-  if (items.length === 0) return <div className="alert alert-info">明細がありません。「取込」タブでファイルを取り込んでください。</div>
+  if (items.length === 0) return <div className="alert alert-info">明細がありません。「取込」タブで{sourceLabel}ください。</div>
 
   const toggle = (id: string) => {
     const s = new Set(selected)
@@ -64,7 +67,7 @@ export default function ItemsTab({ periodId, cfg, items, locked, onDone }: { per
               <th>状態</th>
               <th>{manual ? '入力の行' : '元ファイルの行'}</th>
               {cfg.fields.map((f) => <th key={f.key}>{label(f.key, f.label)}</th>)}
-              {agg && <th className="num">{cfg.manual.aggregate.countLabel}</th>}
+              {agg && <th className="num">{cfg.manual?.aggregate.countLabel}</th>}
               <th>確認日時</th>
             </tr>
           </thead>

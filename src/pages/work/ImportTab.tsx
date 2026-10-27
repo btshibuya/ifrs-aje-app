@@ -1,17 +1,16 @@
 import { useState } from 'react'
 import { useFeedback } from '../../components/feedback'
-import { ErrorBox, formatDateTime } from '../../components/ui'
+import { ErrorBox } from '../../components/ui'
 import { useAsync } from '../../lib/hooks'
 import type { IssueConfig } from '../../lib/issues'
 import {
-  commitImport, downloadSourceFile, fetchColumnMapping, fetchSourceFiles, previewImport, remapPreview, saveCompanyMapping,
+  commitImport, fetchColumnMapping, previewImport, remapPreview, saveCompanyMapping,
   type ImportPreview, type ItemRow, type Period,
 } from '../../lib/workflow'
 import ManualEntry, { type ManualMode } from './ManualEntry'
+import SourceFileHistory from './SourceFileHistory'
 
 type Method = 'file' | ManualMode
-
-const FILE_TYPE_LABELS: Record<string, string> = { excel: 'Excel', csv: 'CSV', pdf: 'PDF', manual: '手入力' }
 
 export default function ImportTab({ period, cfg, items, locked, onDone }: { period: Period; cfg: IssueConfig; items: ItemRow[]; locked: boolean; onDone: () => void }) {
   const fb = useFeedback()
@@ -26,7 +25,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const mapping = useAsync(() => fetchColumnMapping(period, cfg.sourceKind), [period.id, cfg.code])
-  const files = useAsync(() => fetchSourceFiles(period.id, cfg.code), [period.id, cfg.code])
+  const [filesVersion, setFilesVersion] = useState(0)
 
   const onFile = async (file: File | undefined) => {
     if (!file) return
@@ -63,7 +62,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
       setMessage(`${n}件の明細を取り込みました。「明細チェック」で内容を確認してください。`)
       if (remapped && saveMapping) fb.toast('列の対応を、この会社の列マッピングとして保存しました')
       setPreview(null)
-      files.reload()
+      setFilesVersion((v) => v + 1)
       mapping.reload()
       onDone()
     } catch (e) {
@@ -98,7 +97,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
 
       {method !== 'file' && (
         <ManualEntry key={`${period.id}|${method}`} period={period} cfg={cfg} mode={method} items={items} locked={locked}
-          onDone={(n) => { setMessage(`${n}${method === 'aggregate' ? '区分' : '件'}を保存しました。「明細チェック」で内容を確認してください。`); files.reload(); onDone() }} />
+          onDone={(n) => { setMessage(`${n}${method === 'aggregate' ? '区分' : '件'}を保存しました。「明細チェック」で内容を確認してください。`); setFilesVersion((v) => v + 1); onDone() }} />
       )}
 
       {method === 'file' && (
@@ -230,33 +229,7 @@ export default function ImportTab({ period, cfg, items, locked, onDone }: { peri
         </div>
       )}
 
-      <div className="card">
-        <div className="card-title">取込・入力の履歴（元資料の原本）</div>
-        {files.data && files.data.length === 0 && <p className="muted">まだ取り込んでいません。</p>}
-        {files.data && files.data.length > 0 && (
-          <div className="table-wrap">
-            <table className="compact">
-              <thead><tr><th>日時</th><th>入れ方</th><th>ファイル名</th><th className="hide-sp">SHA-256</th><th /></tr></thead>
-              <tbody>
-                {files.data.map((f, i) => (
-                  <tr key={f.id}>
-                    <td className="nowrap">{formatDateTime(f.uploaded_at)}{i === 0 && <span className="badge status-checked" style={{ marginLeft: 6 }}>最新</span>}</td>
-                    <td className="nowrap">{FILE_TYPE_LABELS[f.file_type] ?? f.file_type}</td>
-                    <td>{f.file_name}</td>
-                    <td className="mono small hide-sp">{f.sha256.slice(0, 16)}…</td>
-                    <td>
-                      <button className="btn-link" onClick={async () => {
-                        const url = await downloadSourceFile(f.storage_path)
-                        if (url) window.open(url, '_blank')
-                      }}>原本をダウンロード</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <SourceFileHistory periodId={period.id} issueCode={cfg.code} version={filesVersion} />
     </div>
   )
 }

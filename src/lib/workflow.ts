@@ -3,6 +3,9 @@
 import { calcDepreciation, type AssetRule } from '../calc/depreciation'
 import { calcPaidLeave } from '../calc/paidLeave'
 import type { CalcResult, DetailItem, PriorBalance } from '../calc/types'
+import { calcPackageIssue, packageCsv, PACKAGE_CALCS, type ItemRowData } from './packageCalc'
+import { formByCode } from './materials'
+import type { PackageEntry } from './package'
 import type { IssueConfig } from './issues'
 // 取込ファイルの読み取り（Excel・CSVの読み取りライブラリ）は大きいため、取り込むときにだけ読み込む
 import type { MappedRow } from './parse'
@@ -237,7 +240,7 @@ export async function commitImport(period: Period, cfg: IssueConfig, p: ImportPr
 }
 
 // ファイル取込・手入力の共通：元資料（手入力はCSVにして）を保存し、明細を入れ替える
-export async function commitRows(period: Period, cfg: IssueConfig, p: RowsToSave) {
+export async function commitRows(period: Period, cfg: Pick<IssueConfig, 'code' | 'sourceKind'>, p: RowsToSave) {
   const hash = await sha256(p.buf)
   const ext = p.fileName.split('.').pop()?.toLowerCase() ?? 'bin'
   const path = `${period.id}/${cfg.code}/${Date.now()}_${hash.slice(0, 12)}.${ext}`
@@ -275,6 +278,57 @@ export async function commitRows(period: Period, cfg: IssueConfig, p: RowsToSave
   }
   await setStatus(period.id, cfg.code, 'imported')
   return p.rows.length
+}
+
+// ---------------------------------------------------------------------------
+// 収集パッケージから明細を作る論点：様式の入力を明細として取り込む
+// ---------------------------------------------------------------------------
+
+export interface PackageSource {
+  entry: PackageEntry | null // 同じ基準日の様式
+  others: Record<string, PackageEntry | null> // 計算に使うほかの様式
+  rows: ItemRowData[]
+  csv: string
+  hash: string // いまの入力から作る元資料のハッシュ値
+  lastHash: string | null // 最後に取り込んだ元資料のハッシュ値
+}
+
+export async function fetchPackageSource(period: Period, issueCode: string): Promise<PackageSource> {
+  const def = PACKAGE_CALCS[issueCode]
+  const forms = [def.formCode, ...(def.otherForms ?? [])]
+  const [entries, files] = await Promise.all([
+    supabase.from('package_entries').select('*').eq('company_id', period.company_id).eq('as_of', period.end_date).in('form_code', forms),
+    supabase.from('source_files').select('sha256').eq('period_id', period.id).eq('issue_code', issueCode).order('uploaded_at', { ascending: false }).limit(1),
+  ])
+  const list = must(entries) as PackageEntry[]
+  const of = (code: string) => list.find((e) => e.form_code === code) ?? null
+  const entry = of(def.formCode)
+  const rows = entry ? def.toRows(entry.data, (code) => of(code)?.data) : []
+  const csv = packageCsv(def, rows)
+  return {
+    entry, others: Object.fromEntries((def.otherForms ?? []).map((c) => [c, of(c)])), rows, csv,
+    hash: await sha256(new TextEncoder().encode(csv).buffer as ArrayBuffer), lastHash: (must(files) as { sha256: string }[])[0]?.sha256 ?? null,
+  }
+}
+
+// 提出済・確認済の様式だけを取り込める（入力中は子会社がまだ直している途中のため）
+export async function importFromPackage(period: Period, issueCode: string, src?: PackageSource) {
+  const def = PACKAGE_CALCS[issueCode]
+  const s = src ?? await fetchPackageSource(period, issueCode)
+  const form = formByCode(def.formCode)
+  if (!s.entry) throw new Error(`収集パッケージ「${form?.title ?? def.formCode}」がまだ入力されていません`)
+  if (s.entry.status === 'draft') throw new Error(`収集パッケージ「${form?.title ?? def.formCode}」がまだ提出されていません（入力中）`)
+  // 計算に使うほかの様式（退職給付②の数理計算結果）も、提出済・確認済であること
+  for (const [code, e] of Object.entries(s.others)) {
+    if (!e || e.status === 'draft') throw new Error(`計算に使う収集パッケージ「${formByCode(code)?.title ?? code}」がまだ提出されていません`)
+  }
+  if (s.rows.length === 0) throw new Error('収集パッケージに明細がありません（該当がないときは様式で「該当なし」にしてください）')
+  return commitRows(period, { code: issueCode, sourceKind: 'package' }, {
+    fileName: `${period.companies.code}_収集パッケージ_${form?.title ?? def.formCode}_${period.end_date}.csv`,
+    buf: new TextEncoder().encode(s.csv).buffer as ArrayBuffer, fileType: 'csv', contentType: 'text/csv',
+    // 行番号は元資料（CSV）の行。1行目は見出し
+    rows: s.rows.map((r, i) => ({ rowNo: i + 2, itemKey: r.itemKey, data: r.data })),
+  })
 }
 
 export async function fetchItems(periodId: string, issueCode: string): Promise<ItemRow[]> {
@@ -367,11 +421,31 @@ export interface CalcPlan {
 
 // 計算する（DBには保存しない）。保存は saveCalculation で行う
 export async function planCalculation(period: Period, issueCode: string, items: ItemRow[]): Promise<CalcPlan> {
-  const policy = await fetchPolicy(period.id, issueCode)
-  const taxRate = await fetchTaxRate(period.id)
-  if (taxRate === null) throw new Error('税効果の方針に実効税率（effective_tax_rate）が設定されていません')
-  const prior = await fetchPriorFinal(period, issueCode)
+  const [policy, taxRate, prior] = await Promise.all([fetchPolicy(period.id, issueCode), fetchTaxRate(period.id), fetchPriorFinal(period, issueCode)])
+  const def = PACKAGE_CALCS[issueCode]
+  const noTaxRate = '税効果の方針に実効税率（effective_tax_rate）が設定されていません'
+  if (taxRate === null && def?.taxCategory) throw new Error(noTaxRate)
   const detail: DetailItem[] = items.map((i) => ({ id: i.id, itemKey: i.item_key, data: i.data }))
+
+  if (def) {
+    const missing = def.requires?.(policy.params)
+    if (missing) throw new Error(missing)
+    const result = calcPackageIssue(def, {
+      items: detail, asOf: period.end_date, periodStart: period.start_date, params: policy.params, taxRate, priorBalances: prior.balances,
+    })
+    if (period.prior_period_id && !prior.run) {
+      result.warnings.unshift('前期の計算が確定していないため、期首の調整額を0として計算します（アプリ初年度の扱い。期首の残高は当期の変動に入ります）')
+    }
+    if (prior.run && prior.balances.length === 0) {
+      // 明細から計算する前の形（仕訳だけ）で確定した前期の計算：開始仕訳には入るのに期首の調整額が0になり、二重に計上される
+      result.warnings.unshift('前期の確定した計算に明細ごとの残高がありません（明細から計算する前の形）。期首の調整額が0になり、開始仕訳と二重になります。前期を取り込み直して再計算・確定してから計算してください')
+    }
+    return {
+      result,
+      assumptions: { policy, tax_rate: taxRate, params_used: def.params?.(policy.params) ?? [], prior_run_id: prior.run?.id ?? null },
+    }
+  }
+  if (taxRate === null) throw new Error(noTaxRate)
 
   if (issueCode === 'PAID_LEAVE') {
     const expectedUsageRate = Number(policy.params.expected_usage_rate)

@@ -1,23 +1,25 @@
-// テストデータ：全13論点を、全社（S01〜S10）の前期（1Q〜期末）と当期（1Q・2Q）に入れる／全て消す
+// テストデータ：全17論点を、全社（S01〜S10）の前期（1Q〜期末）と当期（1Q・2Q）に入れる／全て消す
 //
 // 入れるもの
 //   収集パッケージの入力（全様式。期によって確認済・提出済・入力中）と、試算表の提出
 //   有給休暇・減価償却：取込 → 明細チェック → 計算 → 確定を、アプリの処理そのもので行う（S01は手で試すため空ける）
-//   そのほかの論点：収集パッケージの入力から仕訳を簡易計算し、計算・仕訳・確定として保存する
-//     期間の金額の論点（のれん償却・開発費・数理差異・株式報酬）は当期の累計、
-//     残高の論点（割引率・株式・圧縮記帳・資産除去債務・借入手数料・回収可能性）は前年度末からの増減、洗替（固定資産税）は期末の全額
+//   そのほかの論点：収集パッケージの入力を明細として取り込み、明細チェック・計算・確定する
+//     計算はアプリと同じ（packageCalc）。件数が多いため、メモリで計算してから表ごとにまとめて保存する
+//     入力中（提出前）の様式と、画面で入力した様式の会社×時点×論点は、取り込まずに空ける
 //   会社ごとの方針の上書き：のれん・株式報酬・借入手数料を一部の会社で「適用」にする
 //   連結精算表の集計の記録（当期2Q）と、そのあとの S03 有給休暇の訂正（上書き前後を見せる）
 // 入れたものには is_demo_seed を付ける。「全て消す」は、画面で入力したものも含めてマスタ以外を消し、方針の上書きを元に戻す
 
+import type { CalcResult, PriorBalance } from '../calc/types'
 import { fetchConsolidation, saveSnapshot } from './consolidation'
+import { sha256 } from './hash'
 import { ISSUE_CONFIGS } from './issues'
 import { fetchMasters, type MasterData, type PeriodRow } from './masters'
-import { PACKAGE_FORMS, type PackageForm } from './materials'
+import { PACKAGE_FORMS } from './materials'
 import type { EntryData } from './package'
-import { previewFor, type PreviewContext, type PreviewEntry } from './preview'
-import { must, supabase } from './supabase'
-import { commitRows, fetchItems, fetchPeriod, lockIssue, planCalculation, saveCalculation, setChecked } from './workflow'
+import { calcPackageIssue, packageCsv, PACKAGE_CALCS, type ItemRowData } from './packageCalc'
+import { fetchAll, must, supabase } from './supabase'
+import { commitRows, fetchItems, fetchPeriod, itemsHash, lockIssue, planCalculation, saveCalculation, setChecked, type ItemRow } from './workflow'
 
 export type Progress = (message: string, ratio: number) => void
 
@@ -240,62 +242,44 @@ const GEN: Record<string, Gen> = {
 }
 
 // ---------------------------------------------------------------------------
-// 収集パッケージから仕訳を簡易計算する（有給休暇・減価償却以外）
+// 収集パッケージの論点：様式の入力を明細にし、アプリと同じ計算をメモリで行う
 // ---------------------------------------------------------------------------
 
-type Mode = 'flow' | 'balance' | 'full'
-interface IssueRule { form: string; mode: Mode; main: string; tax?: string }
-export const PACKAGE_ISSUES: Record<string, IssueRule> = {
-  LEVY: { form: 'LEVY', mode: 'full', main: 'LEVY_PROPERTY_TAX', tax: 'LEVY_PROPERTY_TAX_TAX' },
-  RETIREMENT_1: { form: 'RETIREMENT_ACTUARIAL', mode: 'flow', main: 'RET1_MAIN', tax: 'RET1_TAX' },
-  RETIREMENT_2: { form: 'RETIREMENT_ASSUMPTIONS', mode: 'balance', main: 'RET2_MAIN', tax: 'RET2_TAX' },
-  EQUITY_INSTRUMENT: { form: 'EQUITY_HOLDINGS', mode: 'balance', main: 'EQ_MAIN', tax: 'EQ_TAX' },
-  GOODWILL: { form: 'GOODWILL', mode: 'flow', main: 'GOODWILL_MAIN' },
-  COMPRESSION: { form: 'COMPRESSION_LIST', mode: 'balance', main: 'COMP_MAIN', tax: 'COMP_TAX' },
-  ARO: { form: 'ARO_LIST', mode: 'balance', main: 'ARO_MAIN', tax: 'ARO_TAX' },
-  SHARE_BASED: { form: 'SO_GRANTS', mode: 'flow', main: 'SBP_MAIN' },
-  EIR: { form: 'LOANS', mode: 'balance', main: 'EIR_MAIN', tax: 'EIR_TAX' },
-  DEVELOPMENT: { form: 'DEV_PROJECTS', mode: 'flow', main: 'DEV_MAIN', tax: 'DEV_TAX' },
-  TAX_EFFECT: { form: 'TAX', mode: 'balance', main: 'TAX_RECOVERABILITY' },
-  ECL: { form: 'RECEIVABLES_AGING', mode: 'full', main: 'ECL_MAIN', tax: 'ECL_TAX' },
-  IMPAIRMENT: { form: 'IMPAIRMENT_TEST', mode: 'balance', main: 'IMP_MAIN', tax: 'IMP_TAX' },
-  PROVISION: { form: 'PROVISIONS_LIST', mode: 'balance', main: 'PROV_MAIN', tax: 'PROV_TAX' },
-  LT_BENEFITS: { form: 'LT_BENEFITS', mode: 'balance', main: 'LTB_MAIN', tax: 'LTB_TAX' },
+interface PkgPlan {
+  companyCode: string
+  period: PeriodRow
+  issue: string
+  year: 0 | 1
+  final: boolean
+  rows: ItemRowData[]
+  csv: string
+  result: CalcResult // 明細のidは仮（行の番号）。保存のときに入れ替える
+  prior?: PkgPlan // 期首の調整額に使った前期（前年度末）の計算
+  assumptions: Record<string, unknown>
 }
 
-// プレビューにない計算（株式報酬・回収可能性）
-function customEntries(issue: string, d: EntryData, months: number): PreviewEntry[] | null {
-  const ln = (side: 'debit' | 'credit', account: string, amount: number, formula: string) => ({ side, account, amount, formula, refs: [], external: [] })
-  const pair = (dr: string, cr: string, v: number, formula: string, title: string): PreviewEntry[] => {
-    const a = Math.round(v)
-    if (a === 0) return []
-    return [{ title, lines: a > 0 ? [ln('debit', dr, a, formula), ln('credit', cr, a, formula)] : [ln('debit', cr, -a, formula), ln('credit', dr, -a, formula)] }]
-  }
-  if (issue === 'SHARE_BASED') {
-    // 失効見込みの見直し：日本基準は失効が確定した時に戻し入れ、IFRSは見込みで費用を減らす（ここでは期間の費用の5%）
-    const cost = (d.rows ?? []).reduce((s, r) => s + Number(r.units ?? 0) * Number(r.fair_value ?? 0) / 24 * months, 0)
-    return pair('BS_SHARE_OPTIONS', 'PL_SHARE_COMP', cost * 0.05, `費用 ${Math.round(cost).toLocaleString('ja-JP')} × 失効見込み 5%`, '株式報酬：失効見込みの反映')
-  }
-  if (issue === 'TAX_EFFECT') {
-    // IFRSでは将来の課税所得の見込みで判断し、評価性引当額の一部（25%）を繰延税金資産として認める
-    const va = Number(d.fields?.valuation_allowance ?? 0)
-    return pair('BS_DTA', 'PL_DEFERRED_TAX', va * 0.25, `評価性引当額 ${va.toLocaleString('ja-JP')} × 25%`, '回収可能性の見直し（繰延税金資産の追加計上）')
-  }
-  return null
-}
+// 前期の確定した計算の残高として渡す（DBに保存して読み直したときと同じ形）
+const toPrior = (r: CalcResult): PriorBalance[] =>
+  r.balances.map((b) => ({ itemKey: b.itemKey, balanceType: b.balanceType, jgaapAmount: b.jgaapAmount, ifrsAmount: b.ifrsAmount, temporaryDifference: b.temporaryDifference, movementType: b.movementType, extra: b.extra }))
 
-// 1つの時点の仕訳（区分ごとに、科目の借方プラスの金額）
-function journalAt(issue: string, form: PackageForm, d: EntryData, ctx: PreviewContext, months: number) {
-  const rule = PACKAGE_ISSUES[issue]
-  const entries = customEntries(issue, d, months) ?? previewFor(form, d, ctx).entries
-  const out = new Map<string, { title: string; formula: string; net: Map<string, number> }>()
-  for (const e of entries) {
-    const cat = /税効果/.test(e.title) && rule.tax ? rule.tax : rule.main
-    const x = out.get(cat) ?? { title: e.title, formula: e.lines[0]?.formula ?? '', net: new Map<string, number>() }
-    for (const l of e.lines) x.net.set(l.account, (x.net.get(l.account) ?? 0) + (l.side === 'debit' ? l.amount : -l.amount))
-    out.set(cat, x)
+function planPackageIssue(x: {
+  companyCode: string; pt: Point; issue: string; data: EntryData; other: (formCode: string) => EntryData | undefined
+  policy: { applicability: string | null; params: Record<string, unknown> }; taxRate: number; prior: PkgPlan | undefined; final: boolean
+}): PkgPlan | null {
+  const def = PACKAGE_CALCS[x.issue]
+  if (def.requires?.(x.policy.params)) return null
+  const rows = def.toRows(x.data, x.other)
+  if (rows.length === 0) return null
+  const result = calcPackageIssue(def, {
+    items: rows.map((r, i) => ({ id: String(i), itemKey: r.itemKey, data: r.data })), asOf: x.pt.period.end_date, periodStart: x.pt.period.start_date,
+    params: x.policy.params, taxRate: x.taxRate, priorBalances: x.prior ? toPrior(x.prior.result) : [],
+  })
+  // 作業画面の計算（planCalculation）と同じ確認事項・前提値
+  if (x.pt.period.prior_period_id && !x.prior) result.warnings.unshift('前期の計算が確定していないため、期首の調整額を0として計算します（アプリ初年度の扱い。期首の残高は当期の変動に入ります）')
+  return {
+    companyCode: x.companyCode, period: x.pt.period, prior: x.prior, issue: x.issue, year: x.pt.year, final: x.final, rows, csv: packageCsv(def, rows), result,
+    assumptions: { policy: x.policy, tax_rate: x.taxRate, params_used: def.params?.(x.policy.params) ?? [], warnings: result.warnings },
   }
-  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -443,41 +427,47 @@ export async function insertTestData(progress: Progress = () => {}) {
     must(await supabase.from('source_files').insert({ period_id: pt.period.id, issue_code: null, source_kind: 'trial_balance', file_name: `${code}_試算表_${pt.period.label}.csv`, file_type: 'csv', storage_path: path, sha256: hash, is_demo_seed: true }))
   })))
 
-  // ---- 収集パッケージの論点の計算・仕訳 ----
-  progress('収集パッケージの論点の仕訳を作っています', 0.16)
-  type Plan = { period: PeriodRow; issue: string; final: boolean; entries: { cat: string; title: string; formula: string; net: Map<string, number> }[] }
-  const plans: Plan[] = []
+  // ---- 収集パッケージの論点：様式の入力を明細として取り込み、計算・確定する ----
+  progress('収集パッケージの論点を計算しています', 0.16)
+  const pkgStatus = new Map(pkgRows.map((x) => [`${x.company_id}|${x.as_of}|${x.form_code}`, String(x.status)]))
+  // 画面で入れた明細・計算・状況がある会社×時点×論点は、テストデータで上書きしない
+  const pkgIssues = Object.keys(PACKAGE_CALCS)
+  type PI = { period_id: string; issue_code: string }
+  const userOwned = new Set((await Promise.all([
+    fetchAll<PI>((f, t) => supabase.from('detail_items').select('period_id, issue_code').eq('is_demo_seed', false).in('issue_code', pkgIssues).order('id').range(f, t)),
+    fetchAll<PI>((f, t) => supabase.from('calculation_runs').select('period_id, issue_code').eq('is_demo_seed', false).in('issue_code', pkgIssues).in('status', ['draft', 'final']).order('id').range(f, t)),
+    fetchAll<PI>((f, t) => supabase.from('work_status').select('period_id, issue_code').eq('is_demo_seed', false).in('issue_code', pkgIssues).order('id').range(f, t)),
+  ])).flat().map((x) => `${x.period_id}|${x.issue_code}`))
+  const policyOf = (pid: string, issue: string) => {
+    const x = pol.find((p) => p.period_id === pid && p.issue_code === issue)
+    return { applicability: x?.applicability ?? null, params: x?.params ?? {} }
+  }
+  const plans: PkgPlan[] = []
   for (const c of m.companies) {
     const pts = points.get(c.id)!
-    for (const [issue, rule] of Object.entries(PACKAGE_ISSUES)) {
-      const form = PACKAGE_FORMS.find((f) => f.code === rule.form)!
-      const at = (pt: Point) => {
-        const d = dataOf.get(`${c.id}|${form.code}|${pt.period.id}`)
-        if (!d) return null
-        const ctx: PreviewContext = {
-          asOf: pt.period.end_date, periodStart: pt.period.start_date, taxRate: taxOf(pt.period.id), params: paramsOf(pt.period.id),
-          other: (fc) => dataOf.get(`${c.id}|${fc}|${pt.period.id}`),
-        }
-        return journalAt(issue, form, d, ctx, pt.months)
-      }
+    for (const [issue, def] of Object.entries(PACKAGE_CALCS)) {
+      let priorFy: PkgPlan | undefined
       for (const pt of pts) {
-        if (!applied(pt.period.id, issue)) continue
-        const now = at(pt)
-        if (!now) continue
-        // 残高の論点は、前年度末（確定）からの増減を当期の仕訳にする
-        const base = rule.mode === 'balance' && pt.year === 1 ? at(pts.find((x) => x.slot === 'prior:FY')!) : null
-        const entries = [...new Set([...now.keys(), ...(base?.keys() ?? [])])].map((cat) => {
-          const a = now.get(cat)
-          const b = base?.get(cat)
-          const net = new Map<string, number>()
-          for (const acc of new Set([...(a?.net.keys() ?? []), ...(b?.net.keys() ?? [])])) net.set(acc, (a?.net.get(acc) ?? 0) - (b?.net.get(acc) ?? 0))
-          return { cat, title: (a ?? b)!.title + (base ? '（前年度末からの増減）' : ''), formula: (a ?? b)!.formula, net }
-        }).filter((e) => [...e.net.values()].some((v) => Math.round(v) !== 0))
-        plans.push({ period: pt.period, issue, final: !(pt.slot === 'current:Q2' && Q2_DRAFT.has(`${c.code}|${issue}`)), entries })
+        if (!applied(pt.period.id, issue) || userOwned.has(`${pt.period.id}|${issue}`)) continue
+        const key = `${c.id}|${pt.period.end_date}|${def.formCode}`
+        const data = dataOf.get(`${c.id}|${def.formCode}|${pt.period.id}`)
+        // 入力中（提出前）の様式と、画面で入力した様式は取り込まない
+        if (!data || taken.has(key) || pkgStatus.get(key) === 'draft') continue
+        // 計算に使うほかの様式も、テストデータで提出済みのものだけ（画面の取込と同じ条件）
+        const otherKeys = (def.otherForms ?? []).map((fc) => `${c.id}|${pt.period.end_date}|${fc}`)
+        if (otherKeys.some((k) => taken.has(k) || !pkgStatus.has(k) || pkgStatus.get(k) === 'draft')) continue
+        const plan = planPackageIssue({
+          companyCode: c.code, pt, issue, data, other: (fc) => dataOf.get(`${c.id}|${fc}|${pt.period.id}`),
+          policy: policyOf(pt.period.id, issue), taxRate: taxOf(pt.period.id), prior: pt.year === 1 ? priorFy : undefined,
+          final: !(pt.slot === 'current:Q2' && Q2_DRAFT.has(`${c.code}|${issue}`)),
+        })
+        if (!plan) continue
+        plans.push(plan)
+        if (pt.slot === 'prior:FY') priorFy = plan
       }
     }
   }
-  await savePlans(plans)
+  await savePackagePlans(plans, (r) => progress('収集パッケージの論点の明細・計算・仕訳を保存しています', 0.16 + 0.12 * r))
 
   // ---- 有給休暇・減価償却（S01 は手で試すため空ける） ----
   const chains: (() => Promise<void>)[] = []
@@ -494,11 +484,11 @@ export async function insertTestData(progress: Progress = () => {}) {
   }
   let done = 0
   const total = chains.length
-  progress(`有給休暇・減価償却を計算しています（0/${total}）`, 0.25)
+  progress(`有給休暇・減価償却を計算しています（0/${total}）`, 0.3)
   await Promise.all(chains.map(async (run) => {
     await run()
     done++
-    progress(`有給休暇・減価償却を計算しています（${done}/${total}）`, 0.25 + 0.65 * (done / total))
+    progress(`有給休暇・減価償却を計算しています（${done}/${total}）`, 0.3 + 0.6 * (done / total))
   }))
 
   // ---- 連結精算表：当期2Qを集計し、そのあとで S03 の有給休暇を訂正する ----
@@ -512,49 +502,105 @@ export async function insertTestData(progress: Progress = () => {}) {
   progress('テストデータを入れました', 1)
 }
 
-// 300行ずつ入れ、入れた行（選んだ列）を返す（1回の応答の行数の上限を超えないように）
-async function insertChunked<T>(table: string, rows: Record<string, unknown>[], columns: string): Promise<T[]> {
+// 同時にいくつかずつ動かす（Storage・DBへの送信が一度に集中しないように）
+async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++])
+  }))
+}
+
+// 行が多い表は、500行ずつ4本並べて入れる。返す行は入れた順とは限らないため、呼び出し側は値で突き合わせる
+async function insertMany<T>(table: string, rows: Record<string, unknown>[], columns?: string): Promise<T[]> {
+  const chunks: Record<string, unknown>[][] = []
+  for (let i = 0; i < rows.length; i += 500) chunks.push(rows.slice(i, i + 500))
   const out: T[] = []
-  for (let i = 0; i < rows.length; i += 300) out.push(...(must(await supabase.from(table).insert(rows.slice(i, i + 300)).select(columns)) as T[]))
+  await pool(chunks, 4, async (c) => {
+    if (columns) out.push(...(must(await supabase.from(table).insert(c).select(columns)) as T[]))
+    else must(await supabase.from(table).insert(c))
+  })
   return out
 }
 
-// 計算・計算シートの行・仕訳・状況をまとめて保存する（件数が多いため、表ごとに一度に入れる）
-async function savePlans(plans: { period: PeriodRow; issue: string; final: boolean; entries: { cat: string; title: string; formula: string; net: Map<string, number> }[] }[]) {
-  // 調整がない時点も、計算して「調整なし」と記録する（確定の状況と計算をそろえる）
-  const withEntries = plans
-  const runs = await insertChunked<{ id: string; period_id: string; issue_code: string }>('calculation_runs', withEntries.map((p) => ({
-    period_id: p.period.id, issue_code: p.issue, status: p.final ? 'final' : 'draft', input_hash: 'test-data', is_demo_seed: true,
-    assumptions_snapshot: { source: 'テストデータ：収集パッケージの入力から簡易計算', warnings: [] }, note: 'テストデータ',
-  })), 'id, period_id, issue_code')
-  const runOf = (p: (typeof withEntries)[number]) => runs.find((r) => r.period_id === p.period.id && r.issue_code === p.issue)!.id
-
-  const steps = await insertChunked<{ id: string; run_id: string; step_no: number }>('calculation_steps', withEntries.flatMap((p) => (p.entries.length ? p.entries.map((e, i) => ({
-    run_id: runOf(p), item_key: null, step_no: i + 1, label: e.title, formula: `収集パッケージの入力から簡易計算：${e.formula}`,
-    value: Math.round([...e.net.values()].filter((v) => v > 0).reduce((s, v) => s + v, 0)),
-  })) : [{ run_id: runOf(p), item_key: null, step_no: 1, label: '調整なし', formula: '収集パッケージの入力から、この時点の調整はありません', value: 0 }])), 'id, run_id, step_no')
-
-  const entryRows = withEntries.flatMap((p) => p.entries.map((e, i) => ({ run_id: runOf(p), period_id: p.period.id, issue_code: p.issue, category_code: e.cat, entry_no: i + 1, description: e.title })))
-  const entries = await insertChunked<{ id: string; run_id: string; entry_no: number }>('journal_entries', entryRows, 'id, run_id, entry_no')
-  const lines = withEntries.flatMap((p) => p.entries.flatMap((e, i) => {
-    const runId = runOf(p)
-    const entryId = entries.find((x) => x.run_id === runId && x.entry_no === i + 1)!.id
-    const stepId = steps.find((x) => x.run_id === runId && x.step_no === i + 1)?.id ?? null
-    // 円に丸め、丸めの差は金額の最も大きい行で調整する（貸借を必ず一致させる）。借方を先に並べる
-    const rounded = [...e.net.entries()].map(([a, v]) => [a, Math.round(v)] as [string, number]).filter(([, v]) => v !== 0).sort(([, a], [, b]) => b - a)
-    const diff = rounded.reduce((s2, [, v]) => s2 + v, 0)
-    if (diff !== 0 && rounded.length) {
-      const big = rounded.reduce((x, y) => (Math.abs(y[1]) > Math.abs(x[1]) ? y : x))
-      big[1] -= diff
-    }
-    return rounded.filter(([, v]) => v !== 0).map(([account, v], j) => ({
-      entry_id: entryId, line_no: j + 1, side: v > 0 ? 'debit' : 'credit', group_account_code: account, amount: Math.abs(v), calculation_step_id: stepId,
-    }))
-  }))
-  for (let i = 0; i < lines.length; i += 500) must(await supabase.from('journal_lines').insert(lines.slice(i, i + 500)))
-  // 確定のロックは最後に入れる（ロック中は仕訳を入れられないため）
+// 収集パッケージの論点：元資料 → 明細（チェック済）→ 計算・計算シート・残高 → 仕訳 → 状況（確定）の順に、表ごとにまとめて保存する
+// 確定のロックは最後に入れる（ロック中は明細・計算・仕訳を入れられないため）
+async function savePackagePlans(plans: PkgPlan[], progress: (ratio: number) => void) {
+  if (plans.length === 0) return
   const now = new Date().toISOString()
-  must(await supabase.from('work_status').insert(plans.map((p) => ({
-    period_id: p.period.id, issue_code: p.issue, status: p.final ? 'locked' : 'calculated', locked_at: p.final ? now : null, updated_at: now, is_demo_seed: true,
+  const pk = (p: { period: PeriodRow; issue: string }) => `${p.period.id}|${p.issue}`
+
+  // 1. 元資料（入力をCSVにした原本）
+  const files = new Map<string, { path: string; hash: string }>()
+  let uploaded = 0
+  await pool(plans, 8, async (p) => {
+    const buf = new TextEncoder().encode(p.csv)
+    const hash = await sha256(buf.buffer as ArrayBuffer)
+    const path = `${p.period.id}/${p.issue}/test_${hash.slice(0, 16)}.csv`
+    // 原本を置けなかったときは止める（ハッシュ値だけ残ると、原本の確認で不一致になるため）
+    must(await supabase.storage.from('source-files').upload(path, buf, { contentType: 'text/csv', upsert: true }))
+    files.set(pk(p), { path, hash })
+    if (++uploaded % 50 === 0) progress(0.4 * (uploaded / plans.length))
+  })
+  const sf = await insertMany<{ id: string; storage_path: string }>('source_files', plans.map((p) => {
+    const f = files.get(pk(p))!
+    const title = PACKAGE_FORMS.find((x) => x.code === PACKAGE_CALCS[p.issue].formCode)?.title ?? p.issue
+    return { period_id: p.period.id, issue_code: p.issue, source_kind: 'package', file_name: `${p.companyCode}_収集パッケージ_${title}_${p.period.end_date}.csv`, file_type: 'csv', storage_path: f.path, sha256: f.hash, is_demo_seed: true }
+  }), 'id, storage_path')
+  const fileId = new Map(sf.map((x) => [x.storage_path, x.id]))
+  progress(0.45)
+
+  // 2. 明細（親会社の確認済み）。入力のハッシュ値は、DBから読み直したときと同じ形（jsonb）の値で計算する
+  const items = await insertMany<{ id: string; period_id: string; issue_code: string; item_key: string; data: Record<string, unknown> }>('detail_items', plans.flatMap((p) => p.rows.map((r, i) => ({
+    period_id: p.period.id, issue_code: p.issue, item_key: r.itemKey, source_file_id: fileId.get(files.get(pk(p))!.path), source_row_no: i + 2, data: r.data,
+    review_status: 'checked', checked_at: now, is_demo_seed: true,
+  }))), 'id, period_id, issue_code, item_key, data')
+  const itemId = new Map(items.map((x) => [`${x.period_id}|${x.issue_code}|${x.item_key}`, x.id]))
+  const hashOf = new Map<string, string>()
+  await Promise.all(plans.map(async (p) => {
+    const own = items.filter((x) => x.period_id === p.period.id && x.issue_code === p.issue)
+    hashOf.set(pk(p), await itemsHash(own as unknown as ItemRow[]))
+  }))
+  progress(0.55)
+
+  // 3. 計算（前期の計算のidを前提値に残すため、前期 → 当期の順）
+  const runId = new Map<PkgPlan, string>()
+  for (const year of [0, 1] as const) {
+    const list = plans.filter((p) => p.year === year)
+    const runs = await insertMany<{ id: string; period_id: string; issue_code: string }>('calculation_runs', list.map((p) => ({
+      period_id: p.period.id, issue_code: p.issue, status: p.final ? 'final' : 'draft', input_hash: hashOf.get(pk(p)), is_demo_seed: true, note: 'テストデータ',
+      assumptions_snapshot: { ...p.assumptions, prior_run_id: p.prior ? runId.get(p.prior) ?? null : null },
+    })), 'id, period_id, issue_code')
+    for (const p of list) runId.set(p, runs.find((r) => r.period_id === p.period.id && r.issue_code === p.issue)!.id)
+  }
+  progress(0.62)
+
+  // 4. 計算シートの行（明細の行は明細のidを持つ）と、明細ごとの残高
+  const steps = await insertMany<{ id: string; run_id: string; item_key: string | null; step_no: number }>('calculation_steps', plans.flatMap((p) => p.result.steps.map((s) => ({
+    run_id: runId.get(p), item_key: s.itemKey, step_no: s.stepNo, label: s.label, formula: s.formula, value: s.value,
+    detail_item_id: s.detailItemId !== undefined ? itemId.get(`${pk(p)}|${p.rows[Number(s.detailItemId)].itemKey}`) ?? null : null,
+  }))), 'id, run_id, item_key, step_no')
+  const stepId = new Map(steps.map((s) => [`${s.run_id}|${s.item_key ?? ''}|${s.step_no}`, s.id]))
+  await insertMany('item_balances', plans.flatMap((p) => p.result.balances.map((b) => ({
+    run_id: runId.get(p), period_id: p.period.id, issue_code: p.issue, item_key: b.itemKey, balance_type: b.balanceType,
+    jgaap_amount: b.jgaapAmount, ifrs_amount: b.ifrsAmount, oci_accumulated: b.ociAccumulated, temporary_difference: b.temporaryDifference,
+    movement_type: b.movementType, extra: b.extra,
   }))))
+  progress(0.8)
+
+  // 5. 仕訳（各行は計算シートの集計行を指す）
+  const entries = await insertMany<{ id: string; run_id: string; entry_no: number }>('journal_entries', plans.flatMap((p) => p.result.entries.map((e, i) => ({
+    run_id: runId.get(p), period_id: p.period.id, issue_code: p.issue, category_code: e.categoryCode, entry_no: i + 1, description: e.description,
+  }))), 'id, run_id, entry_no')
+  const entryId = new Map(entries.map((e) => [`${e.run_id}|${e.entry_no}`, e.id]))
+  await insertMany('journal_lines', plans.flatMap((p) => p.result.entries.flatMap((e, i) => e.lines.map((l, j) => ({
+    entry_id: entryId.get(`${runId.get(p)}|${i + 1}`), line_no: j + 1, side: l.side, group_account_code: l.account, amount: l.amount, memo: l.memo ?? null,
+    calculation_step_id: l.stepRef ? stepId.get(`${runId.get(p)}|${l.stepRef.itemKey ?? ''}|${l.stepRef.stepNo}`) ?? null : null,
+  })))))
+  progress(0.92)
+
+  // 6. 状況（確定・計算済）
+  await insertMany('work_status', plans.map((p) => ({
+    period_id: p.period.id, issue_code: p.issue, status: p.final ? 'locked' : 'calculated', locked_at: p.final ? now : null, updated_at: now, is_demo_seed: true,
+  })))
+  progress(1)
 }

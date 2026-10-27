@@ -14,6 +14,7 @@
 import { must, supabase } from './supabase'
 import type { MasterData, PeriodRow } from './masters'
 import type { Slot } from './hooks'
+import { PACKAGE_CALCS } from './packageCalc'
 
 export type Kind = 'opening' | 'realization' | 'current'
 export const KIND_LABELS: Record<Kind, string> = { opening: '開始仕訳', realization: '開始実現仕訳', current: '当期仕訳' }
@@ -169,7 +170,7 @@ export interface Target {
   period: PeriodRow
   priorYears: PeriodRow[]
   status: Map<string, 'draft' | 'final'> // 論点 → 当期の計算の状況
-  missing: string[] // 計算まで実装している論点のうち、適用なのに当期の計算がない論点
+  missing: string[] // 適用なのに当期の計算がない論点
   stale: string[] // 計算のあとで明細が入れ替わり、再計算を待っている論点（前の仕訳のまま集計している）
 }
 
@@ -186,8 +187,8 @@ export interface ConsolidationData {
   snapshots: Snapshot[] // 新しい順
 }
 
-// 計算まで実装している論点（当期の計算の有無を確かめる対象）
-const implementedIssues = ['PAID_LEAVE', 'DEPRECIATION']
+// 当期の計算の有無を確かめる論点（計算まで実装している全論点）
+const implementedIssues = ['PAID_LEAVE', 'DEPRECIATION', ...Object.keys(PACKAGE_CALCS)]
 
 export async function fetchConsolidation(m: MasterData, slot: Slot): Promise<ConsolidationData> {
   const targets: Target[] = []

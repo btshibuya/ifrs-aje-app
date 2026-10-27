@@ -101,7 +101,7 @@ export default function MastersPage() {
         {data && tab === 'issues' && (
           <MasterTable table="issues" title="論点" pk="code" rows={data.issues} onChanged={reload}
             hidden={{ column: 'is_hidden' }}
-            description="非表示にした論点は、進捗一覧・資料一覧・ホームなどに出なくなります。計算まで実装している論点は、有給休暇引当金・減価償却です。"
+            description="非表示にした論点は、進捗一覧・資料一覧・ホームなどに出なくなります。17論点すべて、作業画面で取込・明細チェック・計算・確定まで行えます。"
             columns={[
               { key: 'no', label: '番号', type: 'number', required: true },
               { key: 'code', label: 'コード', type: 'text', required: true, readOnlyOnEdit: true, placeholder: '例：LEASE' },

@@ -1,5 +1,6 @@
 // 検証：計算の根拠をたどる、原本が改ざんされていないか確かめる、計算を再現して一致を確かめる
 
+import { PACKAGE_CALCS } from './packageCalc'
 import { must, supabase } from './supabase'
 import {
   fetchEntries, fetchSteps, itemsHash, planCalculation, type ItemRow, type Period, type Run, type StepRow,
@@ -38,8 +39,9 @@ const TRACE_MAP: Record<string, Record<string, string>> = {
 export interface TraceItem { itemKey: string; value: number }
 
 // 集計行を構成する明細の値（対応がない集計行は null：ほかの集計行から計算した値）
+// 収集パッケージの論点は、集計行の名前から「 合計」を除いたものが明細ごとの行（例：当期の変動 合計（A／B） → 当期の変動（A／B））
 export function contributingItems(issueCode: string, summary: StepRow, steps: StepRow[]): TraceItem[] | null {
-  const itemLabel = TRACE_MAP[issueCode]?.[summary.label]
+  const itemLabel = PACKAGE_CALCS[issueCode] ? (summary.label.includes(' 合計') ? summary.label.replace(' 合計', '') : undefined) : TRACE_MAP[issueCode]?.[summary.label]
   if (!itemLabel) return null
   return steps
     .filter((s) => s.item_key !== null && s.label === itemLabel)
@@ -108,7 +110,7 @@ export async function reproduceCalculation(period: Period, issueCode: string, it
   // 5. 前提値（税率など）が計算時と同じか
   const snap = run.assumptions_snapshot as Record<string, unknown>
   const now = plan.assumptions as Record<string, unknown>
-  const keys = ['tax_rate', 'prior_tax_rate', 'expected_usage_rate', 'social_insurance_rate', 'prior_run_id'].filter((k) => k in now || k in snap)
+  const keys = ['tax_rate', 'prior_tax_rate', 'expected_usage_rate', 'social_insurance_rate', 'params_used', 'prior_run_id'].filter((k) => k in now || k in snap)
   const changed = keys.filter((k) => JSON.stringify(now[k] ?? null) !== JSON.stringify(snap[k] ?? null))
   checks.push({
     label: '前提値（税率・方針・前期の計算）が計算した時と同じ',

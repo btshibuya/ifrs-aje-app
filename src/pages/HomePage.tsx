@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom'
 import { StackedBar } from '../components/charts'
 import { ErrorBox, Loading, PageHeader, SlotToggle, formatDateTime } from '../components/ui'
 import { useAsync, useSlot } from '../lib/hooks'
-import { ISSUE_CONFIGS } from '../lib/issues'
+import { hasCalc } from '../lib/packageCalc'
 import { fetchMasters, type PeriodRow } from '../lib/masters'
 import { formByCode } from '../lib/materials'
 import { fetchStatusContext, materialStates, summarize, summarizeCompanies } from '../lib/package'
-import { must, supabase } from '../lib/supabase'
+import { fetchAll, must, supabase } from '../lib/supabase'
 
 type Severity = 'critical' | 'warning' | 'info'
 interface Todo { severity: Severity; who: string; title: string; detail: string; to: string }
@@ -26,14 +26,14 @@ export default function HomePage() {
     const asOf = periods.map((p) => p.end_date).sort().at(-1) ?? ''
     const [ctx, missing, unbalanced, entries, snap] = await Promise.all([
       fetchStatusContext(pids, m.companies.map((c) => c.id), periods.map((p) => p.end_date), m.issues.map((i) => i.code)),
-      supabase.from('v_missing_carryforward').select('period_id, issue_code, item_key').in('period_id', pids),
+      fetchAll<{ period_id: string; issue_code: string; item_key: string }>((from, to) => supabase.from('v_missing_carryforward').select('period_id, issue_code, item_key').in('period_id', pids).order('period_id').order('issue_code').order('item_key').range(from, to)),
       supabase.from('v_unbalanced_entries').select('period_id, issue_code, entry_no').in('period_id', pids),
       supabase.from('package_entries').select('company_id, as_of, form_code, status, return_note').in('company_id', m.companies.map((c) => c.id)).in('as_of', periods.map((p) => p.end_date)),
       supabase.from('consolidation_snapshots').select('created_at, created_by').eq('as_of', asOf).order('created_at', { ascending: false }).limit(1),
     ])
     return {
       m, periods, ctx,
-      missing: must(missing) as { period_id: string; issue_code: string; item_key: string }[],
+      missing,
       unbalanced: must(unbalanced) as { period_id: string; issue_code: string; entry_no: number }[],
       entries: must(entries) as { company_id: string; as_of: string; form_code: string; status: string; return_note: string | null }[],
       snapshot: (must(snap) as { created_at: string; created_by: string | null }[])[0] ?? null,
@@ -48,8 +48,8 @@ export default function HomePage() {
   const periodOf = (pid: string) => periods.find((p) => p.id === pid)
   const issueName = (code: string) => m.issues.find((i) => i.code === code)?.name ?? code
 
-  // 段階ごとの件数（適用の会社×論点のうち、計算まで実装している論点）
-  const applied = ctx.policies.filter((p) => p.applicability === 'applied' && ISSUE_CONFIGS[p.issue_code])
+  // 段階ごとの件数（適用の会社×論点）
+  const applied = ctx.policies.filter((p) => p.applicability === 'applied' && hasCalc(p.issue_code))
   const statusOf = (pid: string, ic: string) => ctx.work.find((w) => w.period_id === pid && w.issue_code === ic)?.status ?? 'not_started'
   const reached = (min: string[]) => applied.filter((p) => min.includes(statusOf(p.period_id, p.issue_code))).length
   // 資料は会社ごとに数えて合計する（同じファイルを1件と数えるのは会社の中だけ）
@@ -80,7 +80,8 @@ export default function HomePage() {
     if (p) todos.push({ severity: 'critical', who: '親会社', title: `貸借が一致しない仕訳がある（仕訳 No.${u.entry_no}）`, detail: `${company(p.company_id)?.code} ${company(p.company_id)?.name} ／ ${issueName(u.issue_code)}`, to: `/work/${p.id}/${u.issue_code}` })
   }
   const missingBy = new Map<string, string[]>()
-  for (const x of data.missing) missingBy.set(`${x.period_id}|${x.issue_code}`, [...(missingBy.get(`${x.period_id}|${x.issue_code}`) ?? []), x.item_key])
+  // まだ計算していない（未着手の）会社×論点は、当期の計算がないため数えない
+  for (const x of data.missing.filter((r) => statusOf(r.period_id, r.issue_code) !== 'not_started')) missingBy.set(`${x.period_id}|${x.issue_code}`, [...(missingBy.get(`${x.period_id}|${x.issue_code}`) ?? []), x.item_key])
   for (const [k, keys] of missingBy) {
     const [pid, ic] = k.split('|')
     const p = periodOf(pid)
@@ -125,7 +126,7 @@ export default function HomePage() {
             )
           })}
         </ol>
-        <p className="small muted">2〜5 は計算まで実装している論点（有給休暇引当金・減価償却）の件数です。どの段階も、押すと一覧に移ります。</p>
+        <p className="small muted">2〜5 は、適用の会社×論点（全17論点）の件数です。どの段階も、押すと一覧に移ります。</p>
       </section>
 
       <div className="home-grid">
