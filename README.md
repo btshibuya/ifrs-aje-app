@@ -6,7 +6,7 @@
 - 画面：React + TypeScript（Vite）
 - データ：Supabase（東京リージョン、無料プラン）
 - 配色：Word（標準）・Outlook・Excel・PowerPoint・Publisher・OneNote から選べる（ヘッダー右の「配色」）
-- DB設計：[docs/db_design.md](docs/db_design.md)、マイグレーション：[supabase/migrations](supabase/migrations)
+- DB設計：[docs/db_design.md](docs/db_design.md)、引き継ぎ書：[docs/HANDOVER.md](docs/HANDOVER.md)、論点一覧：[docs/issues_list.md](docs/issues_list.md)、マイグレーション：[supabase/migrations](supabase/migrations)
 
 ## できること
 
