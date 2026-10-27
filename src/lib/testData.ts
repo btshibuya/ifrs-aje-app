@@ -1,4 +1,5 @@
-// テストデータ：全17論点を、全社（S01〜S10）の前期（1Q〜期末）と当期（1Q・2Q）に入れる／全て消す
+// テストデータ：全17論点を、全社（S01〜S10）の前期（1Q〜期末）と当期（1Q〜期末）に入れる／全て消す
+// 当期期末は、収集パッケージの入力（金額）だけを入れ、入力中にしておく（提出・取込・計算を画面で試せるように）
 //
 // 入れるもの
 //   収集パッケージの入力（全様式。期によって確認済・提出済・入力中）と、試算表の提出
@@ -100,9 +101,9 @@ function rng(seed: string) {
 const monthIdx = (d: string) => Number(d.slice(0, 4)) * 12 + Number(d.slice(5, 7)) - 1
 const r1000 = (v: number) => Math.round(v / 1000) * 1000
 
-// 会社×時点（前期 1Q〜期末、当期 1Q・2Q）
+// 会社×時点（前期 1Q〜期末、当期 1Q〜期末）
 interface Point { slot: string; period: PeriodRow; fy: PeriodRow; months: number; year: 0 | 1 }
-const SLOTS = ['prior:Q1', 'prior:Q2', 'prior:Q3', 'prior:FY', 'current:Q1', 'current:Q2'] as const
+const SLOTS = ['prior:Q1', 'prior:Q2', 'prior:Q3', 'prior:FY', 'current:Q1', 'current:Q2', 'current:Q3', 'current:FY'] as const
 function pointsOf(m: MasterData, companyId: string): Point[] {
   return SLOTS.map((slot) => {
     const period = m.periodFor(companyId, slot)!
@@ -152,7 +153,7 @@ const GEN: Record<string, Gen> = {
   },
   RETIREMENT_ASSUMPTIONS: ({ code, pt }) => ({
     fields: {
-      discount_rate: [0.8, 0.85, 0.9, 0.9, 1.0, 1.1][SLOTS.indexOf(pt.slot as (typeof SLOTS)[number])] ?? 1,
+      discount_rate: [0.8, 0.85, 0.9, 0.9, 1.0, 1.1, 1.15, 1.2][SLOTS.indexOf(pt.slot as (typeof SLOTS)[number])] ?? 1,
       discount_basis: '国債の利回り', duration: code === 'S09' ? 9.5 : 11.5, attribution: ['S02', 'S05'].includes(code) ? '期間定額基準' : '給付算定式基準',
     },
   }),
@@ -398,7 +399,8 @@ export async function insertTestData(progress: Progress = () => {}) {
         dataOf.set(`${c.id}|${form.code}|${pt.period.id}`, data)
         const key = `${c.code}|${form.code}`
         const cur2 = pt.slot === 'current:Q2'
-        const status = cur2 && (Q2_PACKAGE_DRAFT.has(key) || Q2_PACKAGE_RETURNED.has(key)) ? 'draft' : cur2 && Q2_PACKAGE_SUBMITTED.has(key) ? 'submitted' : 'confirmed'
+        // 当期期末は入力中（金額は入れておき、提出から先を画面で試す）
+        const status = pt.slot === 'current:FY' ? 'draft' : cur2 && (Q2_PACKAGE_DRAFT.has(key) || Q2_PACKAGE_RETURNED.has(key)) ? 'draft' : cur2 && Q2_PACKAGE_SUBMITTED.has(key) ? 'submitted' : 'confirmed'
         const at = `${pt.period.end_date}T09:00:00+09:00`
         pkgRows.push({
           company_id: c.id, as_of: pt.period.end_date, form_code: form.code, issue_code: form.issueCode, data, status,
@@ -474,7 +476,8 @@ export async function insertTestData(progress: Progress = () => {}) {
   for (const c of m.companies) {
     if (c.code === 'S01') continue
     for (const issue of ['PAID_LEAVE', 'DEPRECIATION'] as const) {
-      const pts = points.get(c.id)!.filter((pt) => applied(pt.period.id, issue))
+      // 当期期末は収集パッケージが入力中のため計算しない
+      const pts = points.get(c.id)!.filter((pt) => applied(pt.period.id, issue) && pt.slot !== 'current:FY')
       if (!pts.length) continue
       // 前期は1Q→期末、当期は前期末の確定から。会社×論点ごとに順に、会社どうしは同時に進める
       chains.push(async () => {

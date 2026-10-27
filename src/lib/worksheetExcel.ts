@@ -37,6 +37,8 @@ export async function exportWorksheet(input: { title: string; subtitle: string; 
   }
   ws.getCell(`A${r + 1}`).value = '借方はそのまま、貸方は△（円）。当期利益への影響はプラス＝利益が増える。'
   ws.getCell(`A${r + 1}`).font = { color: { argb: 'FF6B7785' } }
+  // アプリと同じ書体（Windows ではメイリオ）。太字・色などはそのまま
+  ws.eachRow({ includeEmpty: true }, (row) => row.eachCell({ includeEmpty: true }, (c) => { c.font = { ...(c.font ?? {}), name: 'Meiryo', size: c.font?.size ?? 10 } }))
   const buf = await wb.xlsx.writeBuffer()
   return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 }
